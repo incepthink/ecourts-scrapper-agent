@@ -84,6 +84,29 @@ a { color: inherit; }
 .toast.info { background: #eef6f1; border-color: #cfe7da; color: var(--won); }
 @keyframes toast-in { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: none; } }
 
+/* ---- portal-down banner (non-dismissible) ---- */
+.portal-banner {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  flex-wrap: wrap;
+  background: #fdecea; border-bottom: 1px solid #f3b7af; color: #8a2c20;
+  padding: 10px 22px; font-size: 14px;
+}
+.portal-banner .pb-text { display: flex; align-items: center; gap: 8px; line-height: 1.4; }
+.portal-banner .pb-dot { color: #c0392b; font-size: 11px; animation: pb-pulse 1.4s ease-in-out infinite; }
+@keyframes pb-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+.portal-banner .pb-actions { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+.pb-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  border: 1px solid #d98b80; background: #fff; color: #8a2c20;
+  padding: 6px 12px; border-radius: 8px; font-weight: 600; font-size: 13px;
+  cursor: pointer; text-decoration: none; white-space: nowrap;
+}
+.pb-btn:hover { background: #fff5f3; }
+
+/* external-link glyph shared by Verify controls */
+.ext-icon { width: 14px; height: 14px; margin-left: 6px; vertical-align: -2px; }
+.pb-btn .ext-icon { margin-left: 2px; }
+
 /* ---- confirm modal ---- */
 .modal-backdrop {
   position: fixed; inset: 0; background: rgba(15, 27, 51, .45);
@@ -103,6 +126,19 @@ a { color: inherit; }
 }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
 .btn.secondary { background: transparent; color: var(--ink); border-color: var(--line); }
+
+/* ---- portal-down alert modal ---- */
+.modal.alert { text-align: center; }
+.modal.alert .alert-icon {
+  width: 48px; height: 48px; border-radius: 50%; margin: 0 auto 14px;
+  display: grid; place-items: center; font-size: 26px; font-weight: 800;
+  background: #fdecea; color: #c0392b; border: 1px solid #f3b7af;
+}
+.modal.alert h2 { font-size: 21px; }
+.modal.alert .alert-msg { color: var(--ink); font-size: 15px; margin: 0 0 10px; }
+.modal.alert .alert-sub { color: var(--muted); font-size: 13.5px; margin: 0 0 4px; }
+.modal.alert .modal-actions { justify-content: center; }
+.modal.alert .modal-actions .btn { display: inline-flex; align-items: center; }
 
 /* ---- progress ---- */
 .panel { background: #fff; border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 22px; }

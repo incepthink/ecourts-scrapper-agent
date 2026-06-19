@@ -9,6 +9,37 @@ import Profile from "../components/Profile";
 const STATE_KEY = "ap.stateCode";
 const DIST_KEY = "ap.distCode";
 
+// The official portal we scrape from. Surfaced so users can confirm an outage
+// themselves when it returns 503. Keep the copy in sync with src/portal_status.py.
+const ECOURTS_URL = "https://services.ecourts.gov.in/ecourtindia_v6/";
+const PORTAL_DOWN_MSG =
+  "The official eCourts portal (services.ecourts.gov.in) is currently unavailable, " +
+  "so we can't fetch court data right now. Please try again shortly.";
+
+// Small "opens in a new tab" glyph for the Verify control.
+function ExtIcon() {
+  return (
+    <svg
+      className="ext-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+    >
+      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+      <polyline points="15 3 21 3 21 9" />
+      <line x1="10" y1="14" x2="21" y2="3" />
+    </svg>
+  );
+}
+
+// Anchor styled as a button that opens the eCourts portal in a new tab so the
+// user can verify the source site really is down.
+function VerifyButton({ className = "btn" }) {
+  return (
+    <a className={className} href={ECOURTS_URL} target="_blank" rel="noopener noreferrer">
+      Verify<ExtIcon />
+    </a>
+  );
+}
+
 function TopBar({ session }) {
   return (
     <div className="topbar">
@@ -43,7 +74,7 @@ function SignIn() {
   );
 }
 
-function SearchView({ onResult, notify }) {
+function SearchView({ onResult, notify, onPortalDown }) {
   const [states, setStates] = useState([]);
   const [districts, setDistricts] = useState([]);
   const [stateCode, setStateCode] = useState("");
@@ -51,10 +82,23 @@ function SearchView({ onResult, notify }) {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [statesLoading, setStatesLoading] = useState(true);
+  const [statesError, setStatesError] = useState(false);
+  const [distLoading, setDistLoading] = useState(false);
+  const [distError, setDistError] = useState(false);
 
   useEffect(() => {
-    getStates().then(setStates).catch((e) => notify(e.message));
-  }, [notify]);
+    setStatesLoading(true);
+    setStatesError(false);
+    getStates()
+      .then(setStates)
+      .catch((e) => {
+        setStatesError(true);
+        if (e.status === 503) onPortalDown();
+        else notify(e.message);
+      })
+      .finally(() => setStatesLoading(false));
+  }, [notify, onPortalDown]);
 
   // Restore the saved selection once, after mount (client-only — never read
   // localStorage during render). District-clearing lives in the state onChange,
@@ -69,8 +113,18 @@ function SearchView({ onResult, notify }) {
   // Load districts for the current state (no clearing here — see onStateChange).
   useEffect(() => {
     setDistricts([]);
-    if (stateCode) getDistricts(stateCode).then(setDistricts).catch((e) => notify(e.message));
-  }, [stateCode, notify]);
+    setDistError(false);
+    if (!stateCode) return;
+    setDistLoading(true);
+    getDistricts(stateCode)
+      .then(setDistricts)
+      .catch((e) => {
+        setDistError(true);
+        if (e.status === 503) onPortalDown();
+        else notify(e.message);
+      })
+      .finally(() => setDistLoading(false));
+  }, [stateCode, notify, onPortalDown]);
 
   function onStateChange(e) {
     const v = e.target.value;
@@ -107,7 +161,8 @@ function SearchView({ onResult, notify }) {
       const res = await search({ name, state_code: stateCode, dist_code: distCode, district_name: distName });
       onResult(res, { name, state_code: stateCode, dist_code: distCode, district_name: distName });
     } catch (err) {
-      notify(err.message);
+      if (err.status === 503) onPortalDown({ modal: true });
+      else notify(err.message);
       setBusy(false);
     }
   }
@@ -120,14 +175,24 @@ function SearchView({ onResult, notify }) {
         <div className="field">
           <label>State</label>
           <select value={stateCode} onChange={onStateChange}>
-            <option value="">Select state…</option>
+            <option value="">
+              {statesError ? "Error" : statesLoading ? "Loading…" : "Select state…"}
+            </option>
             {states.map((s) => <option key={s.code} value={s.code}>{s.name}</option>)}
           </select>
         </div>
         <div className="field">
           <label>District</label>
           <select value={distCode} onChange={onDistChange} disabled={!stateCode}>
-            <option value="">{stateCode ? "Select district…" : "Pick a state first"}</option>
+            <option value="">
+              {!stateCode
+                ? "Pick a state first"
+                : distError
+                ? "Error"
+                : distLoading
+                ? "Loading…"
+                : "Select district…"}
+            </option>
             {districts.map((d) => <option key={d.code} value={d.code}>{d.name}</option>)}
           </select>
         </div>
@@ -205,6 +270,8 @@ export default function Page() {
   const [liveCases, setLiveCases] = useState([]);
   const [profile, setProfile] = useState(null);
   const [toasts, setToasts] = useState([]);
+  const [portalDown, setPortalDown] = useState(false);
+  const [portalModalOpen, setPortalModalOpen] = useState(false);
   const esRef = useRef(null);
   const scopeRef = useRef(null);
   const toastId = useRef(0);
@@ -218,6 +285,18 @@ export default function Page() {
     const id = ++toastId.current;
     setToasts((t) => [...t, { id, message, type }]);
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 5000);
+  }, []);
+
+  // The source eCourts portal is down (503). Always raises the persistent top
+  // banner; ``modal`` also pops the explainer dialog and ``redirect`` sends the
+  // user back to the homepage (used when a running scrape fails mid-stream).
+  const handlePortalDown = useCallback((opts = {}) => {
+    setPortalDown(true);
+    if (opts.modal) setPortalModalOpen(true);
+    if (opts.redirect) {
+      if (esRef.current) { esRef.current.close(); esRef.current = null; }
+      setView("search");
+    }
   }, []);
 
   function reset() {
@@ -255,6 +334,12 @@ export default function Page() {
         if (es) es.close();
         loadProfile(data.advocate_id, scopeRef.current).catch((e) => notify(e.message));
       }
+      // Source portal is down: redirect home, raise the banner + explainer modal.
+      if (ev === "error" && data && data.portal_down) {
+        if (es) es.close();
+        handlePortalDown({ modal: true, redirect: true });
+        return;
+      }
       // Only abort on a real server-sent error (it carries a message). The
       // browser also fires a generic, data-less "error" on transient reconnects
       // — ignore those so the stream can recover.
@@ -277,6 +362,18 @@ export default function Page() {
   return (
     <>
       <TopBar session={session} />
+      {portalDown && (
+        <div className="portal-banner" role="alert">
+          <div className="pb-text">
+            <span className="pb-dot" aria-hidden="true">●</span>
+            <span>{PORTAL_DOWN_MSG}</span>
+          </div>
+          <div className="pb-actions">
+            <VerifyButton className="pb-btn" />
+            <button className="pb-btn" onClick={() => window.location.reload()}>Refresh</button>
+          </div>
+        </div>
+      )}
       <div className="toast-wrap">
         {toasts.map((t) => (
           <div key={t.id} className={`toast ${t.type}`} onClick={() => dismiss(t.id)}>
@@ -284,10 +381,30 @@ export default function Page() {
           </div>
         ))}
       </div>
-      {view === "search" && <SearchView onResult={onResult} notify={notify} />}
+      {view === "search" && <SearchView onResult={onResult} notify={notify} onPortalDown={handlePortalDown} />}
       {view === "progress" && <ProgressView job={job} liveCases={liveCases} />}
       {view === "profile" && (
         <div className="wrap"><Profile profile={profile} onReset={reset} /></div>
+      )}
+
+      {portalModalOpen && (
+        <div className="modal-backdrop" onClick={() => setPortalModalOpen(false)}>
+          <div className="modal alert" onClick={(e) => e.stopPropagation()}>
+            <div className="alert-icon" aria-hidden="true">!</div>
+            <h2>Court portal is unavailable</h2>
+            <p className="alert-msg">{PORTAL_DOWN_MSG}</p>
+            <p className="alert-sub">
+              This is an issue with the official eCourts website, not your connection.
+              Verify it’s down, then try again in a little while.
+            </p>
+            <div className="modal-actions">
+              <button className="btn secondary" type="button" onClick={() => setPortalModalOpen(false)}>
+                Close
+              </button>
+              <VerifyButton className="btn" />
+            </div>
+          </div>
+        </div>
       )}
     </>
   );

@@ -25,6 +25,7 @@ import config
 import jobs
 import profile_data
 from advocate_search import AdvocateSearchClient
+from portal_status import PORTAL_DOWN_MESSAGE, is_portal_down
 from bharat_courts.captcha.ocr import OCRCaptchaSolver
 from pipeline import list_district_complexes, process_name
 from store import Advocate, Job, Session
@@ -151,7 +152,8 @@ def run_scrape_job(job_id: int) -> None:
         asyncio.run(_run(job_id))
     except Exception as e:  # noqa: BLE001 - surface any failure to the UI
         logger.exception("job %s failed", job_id)
-        msg = str(e)[:500]
+        portal_down = is_portal_down(e)
+        msg = PORTAL_DOWN_MESSAGE if portal_down else str(e)[:500]
         with Session() as s:
             job = s.get(Job, job_id)
             if job is not None:
@@ -160,7 +162,8 @@ def run_scrape_job(job_id: int) -> None:
                 s.commit()
         try:
             jobs.publish_event(jobs.redis_conn(), job_id,
-                               {"phase": "error", "progress": 100, "message": msg})
+                               {"phase": "error", "progress": 100, "message": msg,
+                                "portal_down": portal_down})
         except Exception:  # noqa: BLE001
             pass
         raise

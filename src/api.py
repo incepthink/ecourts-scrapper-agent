@@ -32,6 +32,7 @@ import jobs
 import profile_data
 import report_html
 import store
+from portal_status import PORTAL_DOWN_MESSAGE, is_portal_down
 from store import Advocate, Session
 
 BACKEND_JWT_SECRET = os.environ.get("BACKEND_JWT_SECRET", "dev-secret-change-me")
@@ -41,7 +42,15 @@ FRONTEND_ORIGINS = [
     if o.strip()
 ]
 # Optional regex to also allow dynamic origins (e.g. Vercel preview deployments).
-FRONTEND_ORIGIN_REGEX = os.environ.get("FRONTEND_ORIGIN_REGEX") or None
+# Always allow localhost/127.0.0.1 on any port for local development, in addition
+# to any custom regex supplied via FRONTEND_ORIGIN_REGEX.
+_LOCALHOST_ORIGIN_REGEX = r"https?://(localhost|127\.0\.0\.1)(:\d+)?"
+_extra_regex = os.environ.get("FRONTEND_ORIGIN_REGEX")
+FRONTEND_ORIGIN_REGEX = (
+    f"({_LOCALHOST_ORIGIN_REGEX})|({_extra_regex})"
+    if _extra_regex
+    else _LOCALHOST_ORIGIN_REGEX
+)
 SCRAPES_PER_DAY = int(os.environ.get("ECOURTS_SCRAPES_PER_DAY", "10"))
 LOC_TTL = int(os.environ.get("ECOURTS_LOC_TTL", "86400"))  # cache states/districts 24h
 
@@ -102,7 +111,12 @@ async def _cached_locations(key: str, builder) -> list[dict]:
     cached = conn.get(key)
     if cached:
         return json.loads(cached)
-    data = await builder()
+    try:
+        data = await builder()
+    except Exception as e:  # noqa: BLE001 - distinguish a portal outage from app errors
+        if is_portal_down(e):
+            raise HTTPException(status_code=503, detail=PORTAL_DOWN_MESSAGE)
+        raise
     conn.setex(key, LOC_TTL, json.dumps(data))
     return data
 
