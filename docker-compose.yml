@@ -1,0 +1,83 @@
+# Single-VM deployment: FastAPI API + RQ worker + Redis + Postgres, fronted by
+# Caddy (automatic HTTPS). The frontend (Next.js) deploys separately on Vercel
+# and points NEXT_PUBLIC_API_URL at https://api.<yourdomain> (served by caddy).
+#
+#   docker compose up -d --build
+#
+# All backend config comes from a local `.env` (NOT committed) — see .env.deploy.example.
+
+services:
+  api:
+    build: .
+    image: ecourts-backend            # built once here, reused by `worker`
+    command: sh -c "uvicorn api:app --host 0.0.0.0 --port 8000"
+    env_file: .env
+    expose:
+      - "8000"                        # internal only; caddy reaches it on this network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    image: ecourts-backend            # same image as api (no separate build)
+    command: sh -c "rq worker -u $$REDIS_URL scrapes"
+    env_file: .env
+    depends_on:
+      api:
+        condition: service_started    # api runs init_db() -> tables exist before first job
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    environment:
+      API_DOMAIN: ${API_DOMAIN}       # e.g. api.yourdomain.com — Caddy issues a cert for this
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
+  caddy_data:
+  caddy_config:

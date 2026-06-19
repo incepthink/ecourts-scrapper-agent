@@ -24,22 +24,29 @@ logger = logging.getLogger(__name__)
 MAX_CASE_DIGESTS = 60
 
 _SYSTEM_PROMPT = (
-    "You are a legal analyst writing a concise, factual profile of an Indian "
-    "advocate from public eCourts district-court records. You are given "
-    "pre-computed aggregate statistics and a sample of the advocate's cases. "
-    "Write a short narrative (3-5 short paragraphs or tight bullet groups) "
-    "covering: overall experience and volume, the mix of disposed vs pending "
-    "matters, observable outcome patterns, the courts/establishments and judges "
-    "they appear before, common case types, frequent co-advocates, and a few "
-    "notable cases. "
-    "Rules: rely only on the data provided — never invent cases, outcomes, "
-    "names, or numbers, and do not contradict the supplied statistics. State "
-    "clearly that outcomes are derived from each case's 'Nature of Disposal', "
-    "which reflects the case result and not necessarily a win for this advocate "
-    "(they may represent either the petitioner or the respondent), and that "
-    "coverage is limited to the configured district's public records. Be "
-    "measured; do not overclaim a 'win rate'. Output plain text only (no "
-    "markdown headings or tables)."
+    "You are a legal analyst writing a factual profile of an Indian advocate from "
+    "public eCourts district-court records. Your reader is a prospective client "
+    "deciding whether to engage this advocate for a specific matter, so write to "
+    "help that decision. You are given pre-computed aggregate statistics, "
+    "deterministic breakdowns (case-type mix, courts, active years, frequent "
+    "co-advocates), and a sample of the advocate's cases. "
+    "Write a clear narrative of 4-6 short paragraphs that foregrounds, in roughly "
+    "this order: (1) the advocate's primary practice areas / case-type "
+    "specialisation and what kinds of matters they handle; (2) the courts and "
+    "jurisdiction where they appear (and the judges, if telling); (3) depth of "
+    "experience — case volume and the span of years active, and how recently they "
+    "have been active; (4) current workload — the balance of pending vs disposed "
+    "matters; (5) observable outcome patterns; and (6) a few notable or "
+    "representative cases. Where useful, name concrete case numbers, case types, "
+    "and courts from the data so the reader can gauge fit for their own matter. "
+    "Rules: rely only on the data provided — never invent cases, outcomes, names, "
+    "or numbers, and do not contradict the supplied statistics. State clearly that "
+    "outcomes are derived from each case's 'Nature of Disposal', which reflects the "
+    "case result and not necessarily a win for this advocate (they may represent "
+    "either the petitioner or the respondent), and that coverage is limited to the "
+    "configured district's public records. Be measured; do not overclaim a 'win "
+    "rate' or guarantee suitability. Output plain text only (no markdown headings "
+    "or tables)."
 )
 
 
@@ -61,13 +68,16 @@ def generate_advocate_summary(
     stats: dict,
     case_digests: list[dict],
     *,
+    aggregates: dict | None = None,
     district: str | None = None,
 ) -> str | None:
     """Return an AI narrative for one advocate, or ``None`` if unavailable.
 
-    ``stats`` is the deterministic aggregate dict and ``case_digests`` is a list
-    of compact per-case dicts (both produced by ``report_html``). Any failure —
-    disabled flag, missing key, network/API error — degrades to ``None``.
+    ``stats`` is the deterministic aggregate dict, ``case_digests`` is a list of
+    compact per-case dicts, and ``aggregates`` holds richer deterministic
+    breakdowns (case-type mix, courts, active years, top co-advocates) — all
+    produced by ``report_html``. Any failure — disabled flag, missing key,
+    network/API error — degrades to ``None``.
     """
     if not config.AI_SUMMARY_ENABLED:
         logger.info("AI summary disabled (ECOURTS_AI_SUMMARY=0); skipping")
@@ -82,6 +92,7 @@ def generate_advocate_summary(
         "advocate_name": advocate_name,
         "district": district or config.DISTRICT_NAME,
         "statistics": stats,
+        "breakdowns": aggregates or {},
         "cases_shown": min(len(case_digests), MAX_CASE_DIGESTS),
         "total_cases": stats.get("total", len(case_digests)),
         "cases": case_digests[:MAX_CASE_DIGESTS],

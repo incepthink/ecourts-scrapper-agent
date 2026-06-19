@@ -1,0 +1,11 @@
+# Reverse proxy + automatic HTTPS for the FastAPI API.
+# API_DOMAIN comes from the .env (passed through in docker-compose.yml), e.g.
+# api.yourdomain.com. Caddy obtains and renews a Let's Encrypt cert automatically
+# once the GoDaddy A record points at this VM and ports 80/443 are reachable.
+#
+# reverse_proxy streams Server-Sent Events (the /jobs/{id}/stream endpoint)
+# correctly with no extra config — Caddy does not buffer responses.
+
+{$API_DOMAIN} {
+	reverse_proxy api:8000
+}

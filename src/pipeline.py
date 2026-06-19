@@ -190,6 +190,7 @@ async def _enrich_case(client: AdvocateSearchClient, row, download_pdfs: bool) -
 async def _search_one(
     client: AdvocateSearchClient,
     *,
+    state_code: str,
     dist_code: str,
     complex_code: str,
     est_code: str,
@@ -211,7 +212,7 @@ async def _search_one(
     for attempt in range(attempts):
         try:
             html = await client.advocate_search_raw(
-                state_code=config.STATE_CODE,
+                state_code=state_code,
                 dist_code=dist_code,
                 court_complex_code=complex_code,
                 est_code=est_code,
@@ -237,10 +238,12 @@ async def _search_one(
 async def _search_complexes(
     client: AdvocateSearchClient,
     *,
+    state_code: str,
     dist_code: str,
     complexes: list[tuple[str, list[str], bool, str]],
     name: str,
     status: str,
+    on_progress=None,
 ) -> tuple[list, list[str]]:
     """Run the advocate search across every complex in the district. Returns
     ``(all_rows, failed)`` where ``all_rows`` includes duplicates (deduped
@@ -250,18 +253,28 @@ async def _search_complexes(
     For a complex flagged ``needs_est`` (establishment selection mandatory) we
     search each establishment separately to guarantee coverage; otherwise a
     single blank-establishment search spans the whole complex.
+
+    ``on_progress`` (optional sync callback) is invoked once per complex so the
+    web worker can stream live "searching court i/N" updates.
     """
     all_rows: list = []
     failed: list[str] = []
-    for complex_code, est_codes, needs_est, cname in complexes:
+    total = len(complexes)
+    for i, (complex_code, est_codes, needs_est, cname) in enumerate(complexes, 1):
+        if on_progress:
+            on_progress({
+                "phase": "search_complex", "index": i, "total": total,
+                "complex_name": cname, "rows_so_far": len(all_rows),
+            })
         if needs_est:
-            ests = await client.list_establishments(config.STATE_CODE, dist_code, complex_code)
+            ests = await client.list_establishments(state_code, dist_code, complex_code)
             est_iter = list(ests) or est_codes or [""]
         else:
             est_iter = [""]
         for est_code in est_iter:
             rows = await _search_one(
                 client,
+                state_code=state_code,
                 dist_code=dist_code,
                 complex_code=complex_code,
                 est_code=est_code,
@@ -280,25 +293,43 @@ async def process_name(
     client: AdvocateSearchClient,
     name: str,
     *,
+    state_code: str = config.STATE_CODE,
     dist_code: str,
     complexes: list[tuple[str, list[str], bool, str]],
     status: str = config.DEFAULT_STATUS,
     download_pdfs: bool = True,
     max_cases: int | None = None,
+    on_progress=None,
 ) -> dict:
     """Search one advocate name across every court complex in the district and
-    fully ingest the resulting cases."""
+    fully ingest the resulting cases.
+
+    ``on_progress`` (optional sync callback) receives structured events
+    (``search_complex`` / ``cases_found`` / ``case_enriched``) so the web worker
+    can stream live progress + partial cases to the browser. CLI callers omit it.
+    """
     rows, failed = await _search_complexes(
-        client, dist_code=dist_code, complexes=complexes, name=name, status=status
+        client, state_code=state_code, dist_code=dist_code, complexes=complexes,
+        name=name, status=status, on_progress=on_progress,
     )
     unique_rows = _upsert_results(name, rows)
     if max_cases is not None:
         unique_rows = unique_rows[:max_cases]
+    if on_progress:
+        on_progress({"phase": "cases_found", "unique_cases": len(unique_rows)})
 
     enriched = 0
+    total = len(unique_rows)
     for row in unique_rows:
         await _enrich_case(client, row, download_pdfs)
         enriched += 1
+        if on_progress:
+            on_progress({
+                "phase": "case_enriched", "index": enriched, "total": total,
+                "cnr": row.cino, "case_number": row.case_number_full,
+                "case_type": row.case_type, "petitioner": row.petitioner,
+                "respondent": row.respondent, "court": row.establishment,
+            })
 
     return {
         "complexes_searched": len(complexes),

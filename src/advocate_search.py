@@ -12,9 +12,11 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from bs4 import BeautifulSoup
+
 from bharat_courts.districtcourts import endpoints
 from bharat_courts.districtcourts.client import DistrictCourtClient
-from bharat_courts.districtcourts.parser import parse_case_status_html
+from bharat_courts.districtcourts.parser import parse_case_status_html, parse_option_tags
 from bharat_courts.models import CaseInfo
 
 from parse_advocate import AdvocateCaseRow
@@ -22,9 +24,83 @@ from parse_history import OrderRow
 
 logger = logging.getLogger(__name__)
 
+# The state dropdown is rendered on the case-status page, not the portal root.
+STATES_PAGE = "casestatus/index"
+
+# Authoritative state code -> name map, captured live from the portal's
+# `sess_state_code` dropdown. Used ONLY as a fallback if the live fetch fails.
+# Do NOT use bharat_courts.endpoints.DISTRICT_STATES here: its codes are stale
+# (e.g. it maps Maharashtra to "27", which the live portal now uses for
+# Chandigarh) and that mismatch is the bug this fallback guards against.
+STATES_FALLBACK: dict[str, str] = {
+    "1": "Maharashtra",
+    "2": "Andhra Pradesh",
+    "3": "Karnataka",
+    "4": "Kerala",
+    "5": "Himachal Pradesh",
+    "6": "Assam",
+    "7": "Jharkhand",
+    "8": "Bihar",
+    "9": "Rajasthan",
+    "10": "Tamil Nadu",
+    "11": "Odisha",
+    "12": "Jammu and Kashmir",
+    "13": "Uttar Pradesh",
+    "14": "Haryana",
+    "15": "Uttarakhand",
+    "16": "West Bengal",
+    "17": "Gujarat",
+    "18": "Chhattisgarh",
+    "19": "Mizoram",
+    "20": "Tripura",
+    "21": "Meghalaya",
+    "22": "Punjab",
+    "23": "Madhya Pradesh",
+    "24": "Sikkim",
+    "25": "Manipur",
+    "26": "Delhi",
+    "27": "Chandigarh",
+    "28": "Andaman and Nicobar",
+    "29": "Telangana",
+    "30": "Goa",
+    "33": "Ladakh",
+    "34": "Nagaland",
+    "35": "Puducherry",
+    "36": "Arunachal Pradesh",
+    "37": "Lakshadweep",
+    "38": "The Dadra And Nagar Haveli And Daman And Diu",
+}
+
 
 class AdvocateSearchClient(DistrictCourtClient):
     """DistrictCourtClient + advocate-name search."""
+
+    async def list_states_live(self) -> dict[str, str]:
+        """Return ``{state_code: name}`` read live from the portal.
+
+        bharat_courts' ``list_states()`` returns a hardcoded map whose codes are
+        stale and no longer match the live ``fillDistrict`` endpoint (it sends
+        Maharashtra as "27", which now returns Chandigarh's districts). Reading
+        the live ``sess_state_code`` dropdown guarantees the codes are consistent
+        with :meth:`list_districts`. No CAPTCHA/token needed — it's a plain GET.
+        """
+        resp = await self._http.get(
+            endpoints.ajax_url(STATES_PAGE), headers={"Referer": endpoints.BASE_URL + "/"}
+        )
+        soup = BeautifulSoup(resp.text, "lxml")
+        sel = soup.find("select", id="sess_state_code")
+        if sel is None:
+            # Markup changed: pick the <select> whose options look like states.
+            for cand in soup.find_all("select"):
+                txt = cand.get_text(" ", strip=True).lower()
+                if "maharashtra" in txt or "karnataka" in txt:
+                    sel = cand
+                    break
+        states = parse_option_tags(str(sel)) if sel is not None else {}
+        if not states:
+            logger.warning("live state dropdown empty; using captured fallback map")
+            return dict(STATES_FALLBACK)
+        return states
 
     async def advocate_search(
         self,

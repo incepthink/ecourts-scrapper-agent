@@ -17,12 +17,15 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    Integer,
     String,
     Text,
     UniqueConstraint,
     create_engine,
     func,
+    inspect,
     select,
+    text,
 )
 from sqlalchemy.orm import (
     DeclarativeBase,
@@ -55,6 +58,10 @@ class Advocate(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(255))
     name_norm: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    # Cached AI narrative + when this advocate's cases were last (re)scraped, so
+    # page views never re-run the scrape or re-call OpenAI (see worker.py).
+    ai_summary: Mapped[str] = mapped_column(Text, default="")
+    last_scraped_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
     cases: Mapped[list["CaseAdvocate"]] = relationship(back_populates="advocate")
 
@@ -124,12 +131,56 @@ class SeedName(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
 
+class Job(Base):
+    """A user-triggered scrape request. The API enqueues one of these (deduping
+    against in-flight jobs); the worker claims it, runs the pipeline, and streams
+    progress. ``status`` drives the live UI: queued -> running -> done|error."""
+
+    __tablename__ = "jobs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    advocate_name: Mapped[str] = mapped_column(String(255))
+    name_norm: Mapped[str] = mapped_column(String(255), index=True)
+    state_code: Mapped[str] = mapped_column(String(8), default="")
+    dist_code: Mapped[str] = mapped_column(String(8), default="")
+    district_name: Mapped[str] = mapped_column(String(255), default="")
+    status: Mapped[str] = mapped_column(String(16), default="queued", index=True)  # queued|running|done|error
+    progress: Mapped[int] = mapped_column(Integer, default=0)  # 0-100
+    phase: Mapped[str] = mapped_column(String(64), default="")
+    message: Mapped[str] = mapped_column(Text, default="")
+    advocate_id: Mapped[int | None] = mapped_column(ForeignKey("advocates.id"), nullable=True)
+    user_id: Mapped[str] = mapped_column(String(255), default="", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
+
+
 _engine = create_engine(config.DB_URL, future=True)
 Session = sessionmaker(bind=_engine, future=True)
 
 
+def _ensure_columns() -> None:
+    """Add columns introduced after a table was first created.
+
+    ``create_all`` only creates missing *tables*, never alters existing ones, so
+    a pre-existing ``ecourts.db`` (or Postgres) would lack the newer Advocate
+    columns. This runs idempotent ``ALTER TABLE ADD COLUMN`` for them — a tiny
+    stand-in for a migration tool. (TEXT/TIMESTAMP are valid on SQLite + Postgres.)
+    """
+    insp = inspect(_engine)
+    tables = set(insp.get_table_names())
+    wanted = {"advocates": {"ai_summary": "TEXT", "last_scraped_at": "TIMESTAMP"}}
+    with _engine.begin() as conn:
+        for table, cols in wanted.items():
+            if table not in tables:
+                continue
+            have = {c["name"] for c in insp.get_columns(table)}
+            for col, ddl_type in cols.items():
+                if col not in have:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {ddl_type}"))
+
+
 def init_db() -> None:
     Base.metadata.create_all(_engine)
+    _ensure_columns()
 
 
 # ---- upsert helpers -------------------------------------------------------

@@ -21,6 +21,12 @@ PDF_DIR.mkdir(parents=True, exist_ok=True)
 HTML_DIR.mkdir(parents=True, exist_ok=True)
 
 DB_URL = os.environ.get("ECOURTS_DB_URL", f"sqlite:///{(DATA_DIR / 'ecourts.db').as_posix()}")
+# Managed Postgres (Render/Heroku) hands out a bare ``postgres://`` / ``postgresql://``
+# URL; SQLAlchemy 2.0 needs an explicit driver. Normalize to psycopg (v3).
+if DB_URL.startswith("postgres://"):
+    DB_URL = "postgresql+psycopg://" + DB_URL[len("postgres://"):]
+elif DB_URL.startswith("postgresql://"):
+    DB_URL = "postgresql+psycopg://" + DB_URL[len("postgresql://"):]
 
 # Target district. The scraper resolves DISTRICT_NAME -> district code live
 # against the portal dropdown (bharat-courts' hardcoded state map is stale),

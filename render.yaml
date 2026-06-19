@@ -1,0 +1,62 @@
+# Render blueprint: FastAPI web service + RQ scrape worker + Postgres + Redis.
+# Frontend (Next.js) deploys separately on Vercel and points at the web service.
+services:
+  - type: web
+    name: ecourts-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerCommand: sh -c "uvicorn api:app --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /health
+    plan: starter
+    envVars:
+      - key: ECOURTS_DB_URL
+        fromDatabase:
+          name: ecourts-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: ecourts-redis
+          property: connectionString
+      - key: BACKEND_JWT_SECRET   # must match the Next.js app's value
+        sync: false
+      - key: FRONTEND_ORIGIN      # e.g. https://your-app.vercel.app
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ECOURTS_AI_SUMMARY
+        value: "1"
+      - key: ECOURTS_SCRAPES_PER_DAY
+        value: "10"
+
+  - type: worker
+    name: ecourts-worker
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerCommand: sh -c "rq worker -u $REDIS_URL scrapes"
+    plan: starter
+    envVars:
+      - key: ECOURTS_DB_URL
+        fromDatabase:
+          name: ecourts-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: ecourts-redis
+          property: connectionString
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ECOURTS_AI_SUMMARY
+        value: "1"
+
+  - type: keyvalue
+    name: ecourts-redis
+    plan: free
+    ipAllowList: []      # only reachable from Render services
+    maxmemoryPolicy: noeviction
+
+databases:
+  - name: ecourts-db
+    databaseName: ecourts
+    plan: basic-256mb

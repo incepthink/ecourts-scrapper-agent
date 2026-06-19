@@ -72,8 +72,36 @@ substring and must match exactly one district. Default: Maharashtra (`1`) /
 - `src/_debug_*.py`, `src/_test_*.py`, `src/_check_*.py` are throwaway
   reverse-engineering scripts — safe to delete.
 
-## Next (not built yet)
+## Web product (live)
+
+The scraper now also powers a public web app: a logged-in user picks any
+**state + district**, searches an advocate, and sees their full profile. Cached
+advocates load instantly; uncached ones trigger an on-demand scrape with **live
+progress streamed to the browser**.
+
+- `src/profile_data.py` — shared JSON profile layer (used by the API *and* the
+  HTML report, so the numbers never diverge).
+- `src/api.py` — FastAPI: `/locations/*`, `/search`, `/jobs/{id}/stream` (SSE),
+  `/advocates/{id}/profile`, `/advocates/{id}/report.html`. Auth via a JWT the
+  Next.js app mints (`BACKEND_JWT_SECRET`); per-user daily scrape rate limit.
+- `src/jobs.py` + `src/worker.py` — Redis/RQ queue. The worker runs the existing
+  pipeline (`--no-pdf`), publishes progress, and caches the AI narrative.
+- `web/` — Next.js + NextAuth (Google) frontend.
+
+Run it:
+
+```bash
+P=.venv/Scripts/python
+cp .env.example .env                                   # set BACKEND_JWT_SECRET, REDIS_URL, OPENAI_API_KEY
+docker run -p 6379:6379 redis                          # or any Redis
+PYTHONPATH=src $P -m uvicorn api:app --reload --port 8000
+PYTHONPATH=src $P -m rq.cli worker scrapes             # Windows: add -w rq.worker.SimpleWorker
+cd web && cp .env.local.example .env.local && npm install && npm run dev
+```
+
+Deploy: frontend → Vercel; API + worker + Postgres + Redis → Render (`render.yaml`).
+
+## Next
 
 - AI extraction of the "winning path" (steps/arguments) from order PDFs.
-- TypeScript/Next.js frontend reading this DB: advocate win/loss profiles +
-  "lawyers who won similar cases".
+- "Lawyers who won similar cases" discovery across the harvested advocate graph.
