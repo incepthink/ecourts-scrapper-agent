@@ -36,8 +36,12 @@ from store import Advocate, Session
 
 BACKEND_JWT_SECRET = os.environ.get("BACKEND_JWT_SECRET", "dev-secret-change-me")
 FRONTEND_ORIGINS = [
-    o.strip() for o in os.environ.get("FRONTEND_ORIGIN", "http://localhost:3000").split(",") if o.strip()
+    o.strip().rstrip("/")
+    for o in os.environ.get("FRONTEND_ORIGIN", "http://localhost:3000").split(",")
+    if o.strip()
 ]
+# Optional regex to also allow dynamic origins (e.g. Vercel preview deployments).
+FRONTEND_ORIGIN_REGEX = os.environ.get("FRONTEND_ORIGIN_REGEX") or None
 SCRAPES_PER_DAY = int(os.environ.get("ECOURTS_SCRAPES_PER_DAY", "10"))
 LOC_TTL = int(os.environ.get("ECOURTS_LOC_TTL", "86400"))  # cache states/districts 24h
 
@@ -45,6 +49,7 @@ app = FastAPI(title="eCourts Advocate Profiles API")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=FRONTEND_ORIGINS,
+    allow_origin_regex=FRONTEND_ORIGIN_REGEX,
     allow_methods=["*"],
     allow_headers=["*"],
 )
