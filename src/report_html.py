@@ -588,8 +588,8 @@ _STAT_SPEC = [
     ("Total cases", "total", "layers", "#9B7826", "#F3EBD6"),
     ("Disposed", "disposed", "gavel", "#1D4ED8", "#E7EDFC"),
     ("Pending", "pending", "clock", "#8A5A06", "#FBF0D6"),
-    ("Allowed / Granted", "allowed_granted", "check", "#1A7F37", "#E8F6EC"),
-    ("Rejected / Dismissed", "rejected_dismissed", "x", "#B42318", "#FDECEA"),
+    ("Granted", "allowed_granted", "check", "#1A7F37", "#E8F6EC"),
+    ("Dismissed", "rejected_dismissed", "x", "#B42318", "#FDECEA"),
     ("Courts / establishments", "courts_establishments", "building", "#5B54C9", "#ECEBFA"),
 ]
 
@@ -647,8 +647,8 @@ def _outcome_viz(stats: dict) -> str:
         f"{stats['rejected_dismissed']} rejected &middot; {stats['other_unknown']} other</span></div>"
         f"<div class='bar'>{out_segs}</div>"
         "<div class='legend'>"
-        "<span><i class='dot' style='background:#1A7F37'></i>Allowed / Granted</span>"
-        "<span><i class='dot' style='background:#B42318'></i>Rejected / Dismissed</span>"
+        "<span><i class='dot' style='background:#1A7F37'></i>Granted</span>"
+        "<span><i class='dot' style='background:#B42318'></i>Dismissed</span>"
         "<span><i class='dot' style='background:#cfd5de'></i>Other / Unknown</span>"
         "</div></div>"
         "<p class='ai-note' style='border-top:0; padding-top:14px'>Outcomes are derived from each "
@@ -787,8 +787,8 @@ def _cases_section(cases: list[dict]) -> str:
         ("all", "All", n_total),
         ("disposed", "Disposed", n_disp),
         ("pending", "Pending", n_pend),
-        ("won", "Allowed / Granted", n_won),
-        ("lost", "Rejected / Dismissed", n_lost),
+        ("won", "Granted", n_won),
+        ("lost", "Dismissed", n_lost),
     ]
     chips = "".join(
         f"<button type='button' class='fchip{' active' if key == 'all' else ''}' "

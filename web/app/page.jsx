@@ -1,267 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { signIn, signOut, useSession } from "next-auth/react";
-import { getStates, getDistricts, search, getProfile, streamJob } from "../lib/backend";
+import { useSession } from "next-auth/react";
+import { AnimatePresence, motion } from "framer-motion";
+import { getProfile, search, streamJob } from "../lib/backend";
+import { SESSION_EXPIRED_MSG, isAuthError } from "../lib/constants";
+import { viewVariants } from "../components/anim";
+import { Loader } from "../components/Icons";
+import TopBar from "../components/TopBar";
+import SignIn from "../components/SignIn";
+import SearchView from "../components/SearchView";
+import ProgressView from "../components/ProgressView";
 import Profile from "../components/Profile";
-
-// Persisted across refreshes so the user keeps their state/district selection.
-const STATE_KEY = "ap.stateCode";
-const DIST_KEY = "ap.distCode";
-
-// The official portal we scrape from. Surfaced so users can confirm an outage
-// themselves when it returns 503. Keep the copy in sync with src/portal_status.py.
-const ECOURTS_URL = "https://services.ecourts.gov.in/ecourtindia_v6/";
-const PORTAL_DOWN_MSG =
-  "The official eCourts portal (services.ecourts.gov.in) is currently unavailable, " +
-  "so we can't fetch court data right now. Please try again shortly.";
-
-// Small "opens in a new tab" glyph for the Verify control.
-function ExtIcon() {
-  return (
-    <svg
-      className="ext-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
-    >
-      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-      <polyline points="15 3 21 3 21 9" />
-      <line x1="10" y1="14" x2="21" y2="3" />
-    </svg>
-  );
-}
-
-// Anchor styled as a button that opens the eCourts portal in a new tab so the
-// user can verify the source site really is down.
-function VerifyButton({ className = "btn" }) {
-  return (
-    <a className={className} href={ECOURTS_URL} target="_blank" rel="noopener noreferrer">
-      Verify<ExtIcon />
-    </a>
-  );
-}
-
-function TopBar({ session }) {
-  return (
-    <div className="topbar">
-      <div className="brand">
-        <span className="mono">AP</span>
-        <span>Advocate Profiles</span>
-      </div>
-      <div className="who">
-        {session ? (
-          <>
-            <span>{session.user?.email}</span>
-            <button className="btn ghost small" onClick={() => signOut()}>Sign out</button>
-          </>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-function SignIn() {
-  return (
-    <div className="center">
-      <div>
-        <h1 className="serif">Know your advocate before you hire</h1>
-        <p>
-          Search any advocate by name and district and see their full case portfolio —
-          outcomes, courts, and history — compiled from public eCourts records.
-        </p>
-        <button className="btn" onClick={() => signIn("google")}>Sign in with Google</button>
-      </div>
-    </div>
-  );
-}
-
-function SearchView({ onResult, notify, onPortalDown }) {
-  const [states, setStates] = useState([]);
-  const [districts, setDistricts] = useState([]);
-  const [stateCode, setStateCode] = useState("");
-  const [distCode, setDistCode] = useState("");
-  const [name, setName] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [confirming, setConfirming] = useState(false);
-  const [statesLoading, setStatesLoading] = useState(true);
-  const [statesError, setStatesError] = useState(false);
-  const [distLoading, setDistLoading] = useState(false);
-  const [distError, setDistError] = useState(false);
-
-  useEffect(() => {
-    setStatesLoading(true);
-    setStatesError(false);
-    getStates()
-      .then(setStates)
-      .catch((e) => {
-        setStatesError(true);
-        if (e.status === 503) onPortalDown();
-        else notify(e.message);
-      })
-      .finally(() => setStatesLoading(false));
-  }, [notify, onPortalDown]);
-
-  // Restore the saved selection once, after mount (client-only — never read
-  // localStorage during render). District-clearing lives in the state onChange,
-  // so a restored district survives while its options load.
-  useEffect(() => {
-    const savedState = localStorage.getItem(STATE_KEY) || "";
-    const savedDist = localStorage.getItem(DIST_KEY) || "";
-    if (savedState) setStateCode(savedState);
-    if (savedDist) setDistCode(savedDist);
-  }, []);
-
-  // Load districts for the current state (no clearing here — see onStateChange).
-  useEffect(() => {
-    setDistricts([]);
-    setDistError(false);
-    if (!stateCode) return;
-    setDistLoading(true);
-    getDistricts(stateCode)
-      .then(setDistricts)
-      .catch((e) => {
-        setDistError(true);
-        if (e.status === 503) onPortalDown();
-        else notify(e.message);
-      })
-      .finally(() => setDistLoading(false));
-  }, [stateCode, notify, onPortalDown]);
-
-  function onStateChange(e) {
-    const v = e.target.value;
-    setStateCode(v);
-    setDistCode(""); // changing state invalidates the previous district
-    if (v) localStorage.setItem(STATE_KEY, v);
-    else localStorage.removeItem(STATE_KEY);
-    localStorage.removeItem(DIST_KEY);
-  }
-
-  function onDistChange(e) {
-    const v = e.target.value;
-    setDistCode(v);
-    if (v) localStorage.setItem(DIST_KEY, v);
-    else localStorage.removeItem(DIST_KEY);
-  }
-
-  const distName = districts.find((d) => d.code === distCode)?.name || "";
-  const stateName = states.find((s) => s.code === stateCode)?.name || "";
-
-  function submit(e) {
-    e.preventDefault();
-    if (!name.trim() || !stateCode || !distCode) {
-      notify("Pick a state, a district, and enter an advocate name.");
-      return;
-    }
-    setConfirming(true); // confirm the name before committing to a scrape
-  }
-
-  async function runSearch() {
-    setConfirming(false);
-    setBusy(true);
-    try {
-      const res = await search({ name, state_code: stateCode, dist_code: distCode, district_name: distName });
-      onResult(res, { name, state_code: stateCode, dist_code: distCode, district_name: distName });
-    } catch (err) {
-      if (err.status === 503) onPortalDown({ modal: true });
-      else notify(err.message);
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div className="wrap">
-      <h1 className="hero-title">Find an advocate</h1>
-      <p className="hero-sub">Select where they practise, then search by name.</p>
-      <form className="search-card" onSubmit={submit}>
-        <div className="field">
-          <label>State</label>
-          <select value={stateCode} onChange={onStateChange}>
-            <option value="">
-              {statesError ? "Error" : statesLoading ? "Loading…" : "Select state…"}
-            </option>
-            {states.map((s) => <option key={s.code} value={s.code}>{s.name}</option>)}
-          </select>
-        </div>
-        <div className="field">
-          <label>District</label>
-          <select value={distCode} onChange={onDistChange} disabled={!stateCode}>
-            <option value="">
-              {!stateCode
-                ? "Pick a state first"
-                : distError
-                ? "Error"
-                : distLoading
-                ? "Loading…"
-                : "Select district…"}
-            </option>
-            {districts.map((d) => <option key={d.code} value={d.code}>{d.name}</option>)}
-          </select>
-        </div>
-        <div className="field full">
-          <label>Advocate name</label>
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Tanveer Nizam" />
-        </div>
-        <div className="notice">
-          If we don’t already have this advocate, we fetch their record live from the court
-          portal — this can take several minutes. You’ll see progress as it runs.
-        </div>
-        <div className="full">
-          <button className="btn" type="submit" disabled={busy}>
-            {busy ? "Searching…" : "Search advocate"}
-          </button>
-        </div>
-      </form>
-
-      {confirming && (
-        <div className="modal-backdrop" onClick={() => setConfirming(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Search this advocate?</h2>
-            <p>We’ll compile the case portfolio for:</p>
-            <div className="confirm-name">{name.trim()}</div>
-            <div className="confirm-meta">
-              Practising before {distName || "—"}{stateName ? `, ${stateName}` : ""}
-            </div>
-            <div className="confirm-note">
-              If we don’t already have this advocate, we fetch their record live from the
-              court portal — this can take several minutes.
-            </div>
-            <div className="modal-actions">
-              <button className="btn secondary" type="button" onClick={() => setConfirming(false)}>
-                Cancel
-              </button>
-              <button className="btn" type="button" onClick={runSearch}>
-                Yes, search
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ProgressView({ job, liveCases }) {
-  return (
-    <div className="wrap">
-      <h1 className="hero-title">Building this profile…</h1>
-      <p className="hero-sub">Fetching live from public court records. This can take a few minutes.</p>
-      <div className="panel">
-        <div className="bar"><span style={{ width: `${job.progress || 2}%` }} /></div>
-        <div className="prog-msg">{job.message || "Starting…"}</div>
-        {liveCases.length ? (
-          <div className="live-list">
-            {liveCases.map((c) => (
-              <div className="live-item" key={c.cnr}>
-                <b>{c.case_number || c.cnr}</b>
-                {c.petitioner ? ` — ${c.petitioner} vs ${c.respondent || "—"}` : ""}
-                {c.court ? ` · ${c.court}` : ""}
-              </div>
-            ))}
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
-}
+import Toasts from "../components/Toasts";
+import PortalBanner from "../components/PortalBanner";
+import PortalModal from "../components/PortalModal";
 
 export default function Page() {
   const { data: session, status } = useSession();
@@ -280,11 +33,22 @@ export default function Page() {
     setToasts((t) => t.filter((x) => x.id !== id));
   }, []);
 
-  // Transient top-right notification that auto-dismisses after 5s.
+  // Top-right notification. Non-auth errors auto-dismiss after 5s; auth/session
+  // errors are rewritten to a clear instruction and stay until the user closes
+  // them. Toasts are de-duplicated by message so repeat failures (e.g. the same
+  // 401 firing twice) only ever show one notification.
   const notify = useCallback((message, type = "error") => {
+    let msg = message;
+    let sticky = false;
+    if (isAuthError(message)) {
+      msg = SESSION_EXPIRED_MSG;
+      sticky = true;
+    }
     const id = ++toastId.current;
-    setToasts((t) => [...t, { id, message, type }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 5000);
+    setToasts((t) => (t.some((x) => x.message === msg) ? t : [...t, { id, message: msg, type, sticky }]));
+    if (!sticky) {
+      setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 5000);
+    }
   }, []);
 
   // The source eCourts portal is down (503). Always raises the persistent top
@@ -321,15 +85,28 @@ export default function Page() {
     }
     // scraping: stream live progress
     setView("progress");
-    setJob({ progress: 2, message: "Queued…" });
+    setJob({ progress: 2, message: "Queued…", phase: "running" });
     setLiveCases([]);
     const es = await streamJob(res.job_id, (ev, data) => {
       if (ev === "case_enriched") {
         setLiveCases((prev) => [data, ...prev].slice(0, 200));
       }
-      if (data && typeof data.progress === "number") {
-        setJob((j) => ({ progress: Math.max(j.progress, data.progress), message: data.message || j.message }));
-      }
+      // Enrich the job state so the staged timeline + counters can render.
+      setJob((j) => {
+        const next = { ...j };
+        if (typeof data.progress === "number") next.progress = Math.max(j.progress || 0, data.progress);
+        if (data.message) next.message = data.message;
+        if (data.phase) next.phase = data.phase;
+        if (ev === "search_complex") { next.searchIndex = data.index; next.searchTotal = data.total; }
+        if (ev === "cases_found") next.casesFound = data.unique_cases;
+        if (ev === "case_enriched") { next.enrichIndex = data.index; next.enrichTotal = data.total; }
+        if (ev === "done" || (ev === "snapshot" && data.status === "done")) {
+          next.phase = "done";
+          next.progress = 100;
+          if (data.result?.unique_cases != null) next.casesFound = data.result.unique_cases;
+        }
+        return next;
+      });
       if ((ev === "snapshot" && data.status === "done") || ev === "done") {
         if (es) es.close();
         loadProfile(data.advocate_id, scopeRef.current).catch((e) => notify(e.message));
@@ -354,7 +131,19 @@ export default function Page() {
 
   useEffect(() => () => { if (esRef.current) esRef.current.close(); }, []);
 
-  if (status === "loading") return <div className="center">Loading…</div>;
+  if (status === "loading") {
+    return (
+      <>
+        <TopBar session={null} />
+        <div className="center">
+          <div style={{ color: "var(--muted)", display: "grid", placeItems: "center", gap: 12 }}>
+            <span className="spin"><Loader size={26} /></span>
+            Loading…
+          </div>
+        </div>
+      </>
+    );
+  }
   if (!session) {
     return (<><TopBar session={null} /><SignIn /></>);
   }
@@ -362,50 +151,32 @@ export default function Page() {
   return (
     <>
       <TopBar session={session} />
-      {portalDown && (
-        <div className="portal-banner" role="alert">
-          <div className="pb-text">
-            <span className="pb-dot" aria-hidden="true">●</span>
-            <span>{PORTAL_DOWN_MSG}</span>
-          </div>
-          <div className="pb-actions">
-            <VerifyButton className="pb-btn" />
-            <button className="pb-btn" onClick={() => window.location.reload()}>Refresh</button>
-          </div>
-        </div>
-      )}
-      <div className="toast-wrap">
-        {toasts.map((t) => (
-          <div key={t.id} className={`toast ${t.type}`} onClick={() => dismiss(t.id)}>
-            {t.message}
-          </div>
-        ))}
-      </div>
-      {view === "search" && <SearchView onResult={onResult} notify={notify} onPortalDown={handlePortalDown} />}
-      {view === "progress" && <ProgressView job={job} liveCases={liveCases} />}
-      {view === "profile" && (
-        <div className="wrap"><Profile profile={profile} onReset={reset} /></div>
-      )}
+      <AnimatePresence>{portalDown && <PortalBanner key="banner" />}</AnimatePresence>
+      <Toasts toasts={toasts} onDismiss={dismiss} />
 
-      {portalModalOpen && (
-        <div className="modal-backdrop" onClick={() => setPortalModalOpen(false)}>
-          <div className="modal alert" onClick={(e) => e.stopPropagation()}>
-            <div className="alert-icon" aria-hidden="true">!</div>
-            <h2>Court portal is unavailable</h2>
-            <p className="alert-msg">{PORTAL_DOWN_MSG}</p>
-            <p className="alert-sub">
-              This is an issue with the official eCourts website, not your connection.
-              Verify it’s down, then try again in a little while.
-            </p>
-            <div className="modal-actions">
-              <button className="btn secondary" type="button" onClick={() => setPortalModalOpen(false)}>
-                Close
-              </button>
-              <VerifyButton className="btn" />
-            </div>
-          </div>
-        </div>
-      )}
+      <main>
+        <AnimatePresence mode="wait">
+          {view === "search" && (
+            <motion.div key="search" variants={viewVariants} initial="initial" animate="animate" exit="exit">
+              <SearchView onResult={onResult} notify={notify} onPortalDown={handlePortalDown} />
+            </motion.div>
+          )}
+          {view === "progress" && (
+            <motion.div key="progress" variants={viewVariants} initial="initial" animate="animate" exit="exit">
+              <ProgressView job={job} liveCases={liveCases} />
+            </motion.div>
+          )}
+          {view === "profile" && (
+            <motion.div key="profile" variants={viewVariants} initial="initial" animate="animate" exit="exit">
+              <Profile profile={profile} onReset={reset} />
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </main>
+
+      <AnimatePresence>
+        {portalModalOpen && <PortalModal key="portal-modal" onClose={() => setPortalModalOpen(false)} />}
+      </AnimatePresence>
     </>
   );
 }

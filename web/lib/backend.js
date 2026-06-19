@@ -55,7 +55,25 @@ export const getProfile = (advocateId, { state_code = "", dist_code = "", distri
       `&dist_code=${encodeURIComponent(dist_code)}&district_name=${encodeURIComponent(district_name)}`
   );
 
-export const reportUrl = (advocateId) => `${API}/advocates/${advocateId}/report.html`;
+// Fetch the rendered report HTML with the Bearer header attached. The caller
+// prints it from a hidden iframe (see Profile.jsx), so the token never lands in
+// a URL and no new tab is opened.
+export async function fetchReportHtml(advocateId) {
+  const token = await getToken();
+  const r = await fetch(`${API}/advocates/${advocateId}/report.html`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!r.ok) {
+    let detail = r.statusText;
+    try {
+      detail = (await r.json()).detail || detail;
+    } catch (_) {}
+    const err = new Error(detail);
+    err.status = r.status;
+    throw err;
+  }
+  return r.text();
+}
 
 // Open an SSE stream for a scrape job. `onEvent(eventName, data)` is called for
 // each progress event. Returns the EventSource so the caller can close it.

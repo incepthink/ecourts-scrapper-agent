@@ -41,8 +41,8 @@ def _outcome_class(nature_of_disposal: str) -> str:
 
 
 _OUTCOME_LABEL = {
-    "won": "Allowed / Granted",
-    "lost": "Rejected / Dismissed",
+    "won": "Granted",
+    "lost": "Dismissed",
     "other": "Other / Unknown",
 }
 

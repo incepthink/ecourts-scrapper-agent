@@ -250,6 +250,8 @@ def advocate_profile(
 
 @app.get("/advocates/{advocate_id}/report.html", response_class=HTMLResponse)
 def advocate_report(advocate_id: int, user: dict = Depends(current_user)) -> HTMLResponse:
+    # Fetched by the frontend with the Bearer header (then printed from a hidden
+    # iframe), so the standard header auth applies — no query-param token needed.
     with Session() as s:
         adv = s.get(Advocate, advocate_id)
         if adv is None:
