@@ -41,11 +41,9 @@ export default function SignIn() {
           <motion.div className="features" variants={staggerParent}>
             {FEATURES.map(({ icon: Icon, t, d }) => (
               <motion.div className="feature" key={t} variants={fadeUp}>
-                <span className="fic"><Icon size={18} /></span>
-                <div>
-                  <div className="ft">{t}</div>
-                  <div className="fd">{d}</div>
-                </div>
+                <div className="ft">{t}</div>
+                <div className="fd">{d}</div>
+                <span className="fic" aria-hidden="true"><Icon size={46} /></span>
               </motion.div>
             ))}
           </motion.div>
