@@ -69,6 +69,11 @@ export default function Page() {
     setJob({ progress: 0, message: "" });
     setLiveCases([]);
     setProfile(null);
+    // The "New search" button at the foot of a long profile fires this while the
+    // window is scrolled far down. The shorter SearchView mounts at the top of
+    // <main>, so without resetting scroll the viewport sits in empty space below
+    // it and the search form looks like it never rendered.
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   async function loadProfile(advocateId, scope) {
