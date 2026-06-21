@@ -16,6 +16,23 @@ import Toasts from "../components/Toasts";
 import PortalBanner from "../components/PortalBanner";
 import PortalModal from "../components/PortalModal";
 
+// The profile a user is viewing is encoded in the URL as query params so the page
+// survives a reload and the link can be shared. Only the advocate id + scope are
+// needed; build_profile rebuilds the identical page from them.
+//   /?adv=<id>&sc=<state_code>&dc=<dist_code>&dn=<district_name>
+function writeProfileUrl(advocateId, scope = {}) {
+  const qs = new URLSearchParams({ adv: String(advocateId) });
+  if (scope.state_code) qs.set("sc", scope.state_code);
+  if (scope.dist_code) qs.set("dc", scope.dist_code);
+  if (scope.district_name) qs.set("dn", scope.district_name);
+  // replaceState (not push) so the back button doesn't cycle through every profile.
+  window.history.replaceState(null, "", `?${qs.toString()}`);
+}
+
+function clearProfileUrl() {
+  window.history.replaceState(null, "", window.location.pathname);
+}
+
 export default function Page() {
   const { data: session, status } = useSession();
   const [view, setView] = useState("search"); // search | progress | profile
@@ -28,6 +45,7 @@ export default function Page() {
   const esRef = useRef(null);
   const scopeRef = useRef(null);
   const toastId = useRef(0);
+  const restoredRef = useRef(false);
 
   const dismiss = useCallback((id) => {
     setToasts((t) => t.filter((x) => x.id !== id));
@@ -65,6 +83,7 @@ export default function Page() {
 
   function reset() {
     if (esRef.current) { esRef.current.close(); esRef.current = null; }
+    clearProfileUrl();
     setView("search");
     setJob({ progress: 0, message: "" });
     setLiveCases([]);
@@ -76,11 +95,14 @@ export default function Page() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  async function loadProfile(advocateId, scope) {
+  const loadProfile = useCallback(async (advocateId, scope) => {
     const p = await getProfile(advocateId, scope);
     setProfile(p);
     setView("profile");
-  }
+    // Encode the (canonical) profile in the URL so a reload restores it and the
+    // link is shareable. Skip the "not found" placeholder — there's nothing to share.
+    if (p.found) writeProfileUrl(p.advocate_id ?? advocateId, scope);
+  }, []);
 
   async function onResult(res, scope) {
     scopeRef.current = scope;
@@ -135,6 +157,29 @@ export default function Page() {
   }
 
   useEffect(() => () => { if (esRef.current) esRef.current.close(); }, []);
+
+  // On first authenticated load, restore the profile named in the URL (a reload or
+  // a shared link). Runs once; the normal fresh-search flow has no ``adv`` param so
+  // this is a no-op there. A logged-out recipient hits <SignIn /> first, then this
+  // fires after they sign back in (their query string survives via callbackUrl).
+  useEffect(() => {
+    if (status !== "authenticated" || restoredRef.current) return;
+    const params = new URLSearchParams(window.location.search);
+    const adv = params.get("adv");
+    if (!adv) return;
+    restoredRef.current = true;
+    const scope = {
+      state_code: params.get("sc") || "",
+      dist_code: params.get("dc") || "",
+      district_name: params.get("dn") || "",
+    };
+    scopeRef.current = scope;
+    loadProfile(Number(adv), scope).catch((e) => {
+      notify(e.message);
+      clearProfileUrl();
+      setView("search");
+    });
+  }, [status, loadProfile, notify]);
 
   if (status === "loading") {
     return (

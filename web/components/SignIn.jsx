@@ -32,7 +32,7 @@ export default function SignIn() {
             eCourts records.
           </p>
           <div className="landing-cta">
-            <button className="btn btn-google lg" onClick={() => signIn("google")}>
+            <button className="btn btn-google lg" onClick={() => signIn("google", { callbackUrl: window.location.href })}>
               <GoogleMark /> Continue with Google
             </button>
             <span className="trust">Free · No data stored on your behalf</span>

@@ -6,7 +6,7 @@ import { fetchReportHtml } from "../lib/backend";
 import { fadeUp, staggerParent, EASE } from "./anim";
 import {
   FileText, CheckCircle, Clock, Check, X, Landmark, Scale, Users,
-  Sparkles, Activity, Download, Plus, SearchIcon, ChevronLeft, ChevronRight,
+  Sparkles, Activity, Download, Plus, SearchIcon, ChevronLeft, ChevronRight, Link2,
 } from "./Icons";
 
 // Cases are paginated client-side so a 200+ case list stays scannable.
@@ -441,7 +441,20 @@ function TopCourts({ courts }) {
 }
 
 export default function Profile({ profile, onReset }) {
+  const [copied, setCopied] = useState(false);
   if (!profile) return null;
+
+  // The current URL already encodes this profile (page.jsx writes it on load), so
+  // sharing is just copying window.location. Brief "Link copied" confirmation.
+  async function copyShareLink() {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch (_) {
+      // Clipboard blocked (insecure context / denied permission) — no-op.
+    }
+  }
 
   async function openReport(e) {
     e.preventDefault();
@@ -530,6 +543,17 @@ export default function Profile({ profile, onReset }) {
             ) : null}
           </div>
           <div className="ph-actions">
+            <span className="share-wrap">
+              <button
+                className="btn ghost icon"
+                onClick={copyShareLink}
+                aria-label="Copy shareable link"
+                title="Copy link"
+              >
+                {copied ? <Check size={16} /> : <Link2 size={16} />}
+              </button>
+              {copied && <span className="copied-tip" role="status">Link copied</span>}
+            </span>
             <a className="btn" href="#" onClick={openReport}><Download size={16} /> Download PDF</a>
             <button className="btn ghost" onClick={onReset}><Plus size={16} /> New search</button>
           </div>
