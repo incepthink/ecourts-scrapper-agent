@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import { AnimatePresence, motion } from "framer-motion";
-import { getProfile, search, streamJob, enableJobNotify } from "../lib/backend";
+import { getProfile, search, streamJob, setJobNotify } from "../lib/backend";
 import { SESSION_EXPIRED_MSG, isAuthError } from "../lib/constants";
 import { viewVariants } from "../components/anim";
 import { Loader } from "../components/Icons";
@@ -62,13 +62,20 @@ export default function Page() {
     setToasts((t) => t.filter((x) => x.id !== id));
   }, []);
 
-  // Loading-screen "email it to me": register the current user's email on the
+  // Loading-screen email switch: register (or clear) the current user's email on the
   // running job so the worker mails them when it finishes. Optimistic — flips the
-  // status bar to "enabled" on success.
-  const enableNotify = useCallback(async () => {
+  // switch immediately and reverts if the request fails (ProgressView surfaces the
+  // error). The worker only reads notify_email at completion, so toggling either way
+  // mid-scrape is honoured.
+  const setNotify = useCallback(async (on) => {
     if (!jobId) return;
-    await enableJobNotify(jobId);
-    setNotifyEmail(true);
+    setNotifyEmail(on);
+    try {
+      await setJobNotify(jobId, on);
+    } catch (e) {
+      setNotifyEmail(!on);
+      throw e;
+    }
   }, [jobId]);
 
   // Top-right notification. Non-auth errors auto-dismiss after 5s; auth/session
@@ -250,7 +257,7 @@ export default function Page() {
                 liveCases={liveCases}
                 email={session?.user?.email}
                 notify={notifyEmail}
-                onEnableNotify={enableNotify}
+                onSetNotify={setNotify}
               />
             </motion.div>
           )}

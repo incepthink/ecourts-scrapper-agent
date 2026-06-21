@@ -4,6 +4,7 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { liveItem, fadeUp, EASE } from "./anim";
 import { Check, Loader, Mail } from "./Icons";
+import Toggle from "./Toggle";
 
 // Stage pipeline. `currentStage` is derived from the latest SSE phase + counters
 // in `deriveStage` below; "Summarizing" has no backend event — it's the gap
@@ -41,24 +42,24 @@ function deriveStage(j) {
   return 0; // running / queued
 }
 
-export default function ProgressView({ job = {}, liveCases = [], email, notify = false, onEnableNotify }) {
+export default function ProgressView({ job = {}, liveCases = [], email, notify = false, onSetNotify }) {
   const progress = Math.max(2, Math.round(job.progress || 0));
   const current = deriveStage(job);
   const isDone = job.phase === "done";
   const enriched = job.enrichIndex || liveCases.length;
 
-  const [sending, setSending] = useState(false);
-  const [enableError, setEnableError] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState(false);
 
-  async function handleEnable() {
-    setSending(true);
-    setEnableError(false);
+  async function handleToggle(next) {
+    setPending(true);
+    setError(false);
     try {
-      await onEnableNotify();
+      await onSetNotify(next);
     } catch (_) {
-      setEnableError(true);
+      setError(true);
     } finally {
-      setSending(false);
+      setPending(false);
     }
   }
 
@@ -76,43 +77,34 @@ export default function ProgressView({ job = {}, liveCases = [], email, notify =
       </div>
 
       {showEmailBar && (
-        <AnimatePresence mode="wait" initial={false}>
-          {notify ? (
-            <motion.div
-              key="email-on"
-              className="email-bar"
-              initial={{ opacity: 0, y: -6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.3, ease: EASE }}
-            >
-              <span className="eb-ic"><Mail size={18} /></span>
-              <span className="eb-text">
-                We'll email your report to <b>{email}</b> when it's ready — you can safely close this tab.
-              </span>
-              <span className="eb-badge"><Check size={13} /> Email on</span>
-            </motion.div>
-          ) : (
-            <motion.div
-              key="email-off"
-              className="email-bar cta"
-              initial={{ opacity: 0, y: -6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.3, ease: EASE }}
-            >
-              <span className="eb-ic"><Mail size={18} /></span>
-              <span className="eb-text">
-                {enableError
-                  ? "Couldn't enable email just now — please try again."
-                  : <>In no rush? We'll email the finished report to <b>{email}</b> so you don't have to wait here.</>}
-              </span>
-              <button className="btn small" type="button" onClick={handleEnable} disabled={sending}>
-                {sending ? <><Loader size={14} className="spin" /> Enabling…</> : "Email it to me"}
-              </button>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        <motion.div
+          className="email-bar"
+          initial={{ opacity: 0, y: -6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, ease: EASE }}
+        >
+          <span className="eb-ic">
+            {pending ? <Loader size={18} className="spin" /> : <Mail size={18} />}
+          </span>
+          <span className="eb-text">
+            <span className="eb-title">
+              {notify ? "We'll email your report when it's ready" : "Email me the finished report"}
+            </span>
+            <span className="eb-sub">
+              {error
+                ? "Couldn't update that just now — please try again."
+                : notify
+                ? <>Sent to <b>{email}</b> — you can safely close this tab.</>
+                : <>No need to wait — we'll send it to <b>{email}</b>.</>}
+            </span>
+          </span>
+          <Toggle
+            on={notify}
+            onChange={handleToggle}
+            disabled={pending}
+            label="Email me when the report is ready"
+          />
+        </motion.div>
       )}
 
       <div className="progress-grid">

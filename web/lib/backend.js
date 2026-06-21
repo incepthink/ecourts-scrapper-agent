@@ -49,10 +49,11 @@ export const search = (body) =>
     body: JSON.stringify(body),
   });
 
-// Opt in to the completion email for an already-running scrape (the loading-page
-// "email it to me" button). The address is taken from the JWT server-side.
-export const enableJobNotify = (jobId) =>
-  request(`/jobs/${jobId}/notify`, { method: "POST" });
+// Toggle the completion email for an already-running scrape (the loading-page
+// switch). `on` registers/clears the address; the address itself is taken from the
+// JWT server-side.
+export const setJobNotify = (jobId, on) =>
+  request(`/jobs/${jobId}/notify?on=${on ? "true" : "false"}`, { method: "POST" });
 
 export const getProfile = (advocateId, { state_code = "", dist_code = "", district_name = "" } = {}) =>
   request(

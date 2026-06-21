@@ -191,17 +191,18 @@ def job(job_id: int, user: dict = Depends(current_user)) -> dict:
 
 
 @app.post("/jobs/{job_id}/notify")
-def enable_job_notify(job_id: int, user: dict = Depends(current_user)) -> dict:
-    """Opt in to the completion email for an already-running scrape (the "email it
-    to me" button on the loading screen). The worker reads ``notify_email`` when the
-    job finishes, so this works any time before completion."""
+def enable_job_notify(job_id: int, on: bool = True, user: dict = Depends(current_user)) -> dict:
+    """Toggle the completion email for an already-running scrape (the switch on the
+    loading screen). ``on=true`` registers the user's email, ``on=false`` clears it.
+    The worker reads ``notify_email`` when the job finishes, so this works any time
+    before completion."""
     with Session() as s:
         job = s.get(store.Job, job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="job not found")
         if job.status in ("done", "error", "cancelled"):
             return {"status": job.status, "updated": False}  # too late / nothing to do
-        job.notify_email = user["email"]
+        job.notify_email = user["email"] if on else ""
         s.commit()
         return {"status": job.status, "updated": True}
 
