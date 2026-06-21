@@ -145,6 +145,7 @@ class SearchBody(BaseModel):
     dist_code: str
     district_name: str = ""
     force: bool = False  # "refresh / fetch latest"
+    notify_email: bool = False  # opt in to an email when the scrape finishes
 
 
 def _rate_limit(user_id: str) -> None:
@@ -163,9 +164,12 @@ def _rate_limit(user_id: str) -> None:
 def search(body: SearchBody, user: dict = Depends(current_user)) -> dict:
     if not body.name.strip():
         raise HTTPException(status_code=400, detail="name is required")
+    # The opt-in is just a flag; the address always comes from the verified JWT,
+    # never from the client (so a user can't have results mailed to someone else).
     res = jobs.enqueue_scrape(
         body.name, body.state_code, body.dist_code, body.district_name,
         user_id=user["id"], force=body.force,
+        notify_to=(user["email"] if body.notify_email else ""),
     )
     # Count only genuinely new scrapes against the user's quota.
     if res["status"] == "scraping" and not res.get("reused"):
@@ -184,6 +188,22 @@ def job(job_id: int, user: dict = Depends(current_user)) -> dict:
     if snap is None:
         raise HTTPException(status_code=404, detail="job not found")
     return snap
+
+
+@app.post("/jobs/{job_id}/notify")
+def enable_job_notify(job_id: int, user: dict = Depends(current_user)) -> dict:
+    """Opt in to the completion email for an already-running scrape (the "email it
+    to me" button on the loading screen). The worker reads ``notify_email`` when the
+    job finishes, so this works any time before completion."""
+    with Session() as s:
+        job = s.get(store.Job, job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="job not found")
+        if job.status in ("done", "error", "cancelled"):
+            return {"status": job.status, "updated": False}  # too late / nothing to do
+        job.notify_email = user["email"]
+        s.commit()
+        return {"status": job.status, "updated": True}
 
 
 @app.get("/jobs/{job_id}/stream")

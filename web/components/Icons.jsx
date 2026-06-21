@@ -73,6 +73,13 @@ export const Clock = (p) => (
   </Svg>
 );
 
+export const Mail = (p) => (
+  <Svg {...p}>
+    <rect x="2" y="4" width="20" height="16" rx="2" />
+    <path d="m22 7-10 6L2 7" />
+  </Svg>
+);
+
 export const Info = (p) => (
   <Svg {...p}>
     <circle cx="12" cy="12" r="10" />

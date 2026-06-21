@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import { AnimatePresence, motion } from "framer-motion";
-import { getProfile, search, streamJob } from "../lib/backend";
+import { getProfile, search, streamJob, enableJobNotify } from "../lib/backend";
 import { SESSION_EXPIRED_MSG, isAuthError } from "../lib/constants";
 import { viewVariants } from "../components/anim";
 import { Loader } from "../components/Icons";
@@ -45,6 +45,9 @@ export default function Page() {
     () => typeof window !== "undefined" && new URLSearchParams(window.location.search).has("adv")
   );
   const [job, setJob] = useState({ progress: 0, message: "" });
+  const [jobId, setJobId] = useState(null);
+  // Whether the user opted in to a completion email for the running scrape.
+  const [notifyEmail, setNotifyEmail] = useState(false);
   const [liveCases, setLiveCases] = useState([]);
   const [profile, setProfile] = useState(null);
   const [toasts, setToasts] = useState([]);
@@ -58,6 +61,15 @@ export default function Page() {
   const dismiss = useCallback((id) => {
     setToasts((t) => t.filter((x) => x.id !== id));
   }, []);
+
+  // Loading-screen "email it to me": register the current user's email on the
+  // running job so the worker mails them when it finishes. Optimistic — flips the
+  // status bar to "enabled" on success.
+  const enableNotify = useCallback(async () => {
+    if (!jobId) return;
+    await enableJobNotify(jobId);
+    setNotifyEmail(true);
+  }, [jobId]);
 
   // Top-right notification. Non-auth errors auto-dismiss after 5s; auth/session
   // errors are rewritten to a clear instruction and stay until the user closes
@@ -94,6 +106,8 @@ export default function Page() {
     clearProfileUrl();
     setView("search");
     setJob({ progress: 0, message: "" });
+    setJobId(null);
+    setNotifyEmail(false);
     setLiveCases([]);
     setProfile(null);
     // The "New search" button at the foot of a long profile fires this while the
@@ -112,7 +126,7 @@ export default function Page() {
     if (p.found) writeProfileUrl(p.advocate_id ?? advocateId, scope);
   }, []);
 
-  async function onResult(res, scope) {
+  async function onResult(res, scope, optedIn = false) {
     scopeRef.current = scope;
     if (res.status === "ready") {
       await loadProfile(res.advocate_id, scope);
@@ -120,6 +134,8 @@ export default function Page() {
     }
     // scraping: stream live progress
     setView("progress");
+    setJobId(res.job_id);
+    setNotifyEmail(!!optedIn);
     setJob({ progress: 2, message: "Queued…", phase: "running" });
     setLiveCases([]);
     const es = await streamJob(res.job_id, (ev, data) => {
@@ -229,7 +245,13 @@ export default function Page() {
           )}
           {view === "progress" && (
             <motion.div key="progress" variants={viewVariants} initial="initial" animate="animate" exit="exit">
-              <ProgressView job={job} liveCases={liveCases} />
+              <ProgressView
+                job={job}
+                liveCases={liveCases}
+                email={session?.user?.email}
+                notify={notifyEmail}
+                onEnableNotify={enableNotify}
+              />
             </motion.div>
           )}
           {view === "profile" && (

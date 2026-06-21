@@ -152,6 +152,9 @@ class Job(Base):
     message: Mapped[str] = mapped_column(Text, default="")
     advocate_id: Mapped[int | None] = mapped_column(ForeignKey("advocates.id"), nullable=True)
     user_id: Mapped[str] = mapped_column(String(255), default="", index=True)
+    # Email to notify when the scrape finishes (empty = no notification). Set from
+    # the opt-in toggle at search time, or via POST /jobs/{id}/notify mid-scrape.
+    notify_email: Mapped[str] = mapped_column(String(255), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
 
@@ -173,6 +176,7 @@ def _ensure_columns() -> None:
     wanted = {
         "advocates": {"ai_summary": "TEXT", "last_scraped_at": "TIMESTAMP"},
         "cases": {"ai_blurb": "TEXT"},
+        "jobs": {"notify_email": "VARCHAR(255)"},
     }
     with _engine.begin() as conn:
         for table, cols in wanted.items():

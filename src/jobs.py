@@ -93,6 +93,7 @@ def enqueue_scrape(
     user_id: str = "",
     *,
     force: bool = False,
+    notify_to: str = "",
 ) -> dict:
     """Decide what to do for a search and act on it.
 
@@ -123,6 +124,11 @@ def enqueue_scrape(
             .order_by(Job.id.desc())
         )
         if existing is not None:
+            # Join the in-flight scrape. If this viewer opted in and no one had yet,
+            # register their email so they're notified too (single field — see jobs note).
+            if notify_to and not existing.notify_email:
+                existing.notify_email = notify_to
+                session.commit()
             return {"status": "scraping", "job_id": existing.id, "reused": True}
 
         job = Job(
@@ -133,6 +139,7 @@ def enqueue_scrape(
             district_name=district_name,
             status="queued",
             user_id=str(user_id or ""),
+            notify_email=notify_to,
         )
         session.add(job)
         session.commit()

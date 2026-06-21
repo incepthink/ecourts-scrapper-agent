@@ -1,8 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { liveItem, fadeUp, EASE } from "./anim";
-import { Check, Loader } from "./Icons";
+import { Check, Loader, Mail } from "./Icons";
 
 // Stage pipeline. `currentStage` is derived from the latest SSE phase + counters
 // in `deriveStage` below; "Summarizing" has no backend event — it's the gap
@@ -40,11 +41,29 @@ function deriveStage(j) {
   return 0; // running / queued
 }
 
-export default function ProgressView({ job = {}, liveCases = [] }) {
+export default function ProgressView({ job = {}, liveCases = [], email, notify = false, onEnableNotify }) {
   const progress = Math.max(2, Math.round(job.progress || 0));
   const current = deriveStage(job);
   const isDone = job.phase === "done";
   const enriched = job.enrichIndex || liveCases.length;
+
+  const [sending, setSending] = useState(false);
+  const [enableError, setEnableError] = useState(false);
+
+  async function handleEnable() {
+    setSending(true);
+    setEnableError(false);
+    try {
+      await onEnableNotify();
+    } catch (_) {
+      setEnableError(true);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  // Only meaningful while the scrape is still running and we know the user's email.
+  const showEmailBar = email && !isDone;
 
   return (
     <motion.div className="wrap" variants={fadeUp} initial="initial" animate="animate">
@@ -55,6 +74,46 @@ export default function ProgressView({ job = {}, liveCases = [] }) {
           We're fetching everything live — this can take a few minutes. You can watch it happen below.
         </p>
       </div>
+
+      {showEmailBar && (
+        <AnimatePresence mode="wait" initial={false}>
+          {notify ? (
+            <motion.div
+              key="email-on"
+              className="email-bar"
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.3, ease: EASE }}
+            >
+              <span className="eb-ic"><Mail size={18} /></span>
+              <span className="eb-text">
+                We'll email your report to <b>{email}</b> when it's ready — you can safely close this tab.
+              </span>
+              <span className="eb-badge"><Check size={13} /> Email on</span>
+            </motion.div>
+          ) : (
+            <motion.div
+              key="email-off"
+              className="email-bar cta"
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.3, ease: EASE }}
+            >
+              <span className="eb-ic"><Mail size={18} /></span>
+              <span className="eb-text">
+                {enableError
+                  ? "Couldn't enable email just now — please try again."
+                  : <>In no rush? We'll email the finished report to <b>{email}</b> so you don't have to wait here.</>}
+              </span>
+              <button className="btn small" type="button" onClick={handleEnable} disabled={sending}>
+                {sending ? <><Loader size={14} className="spin" /> Enabling…</> : "Email it to me"}
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      )}
 
       <div className="progress-grid">
         {/* left: progress + stepper */}

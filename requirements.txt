@@ -37,3 +37,4 @@ rq>=1.16
 redis>=5.0
 python-jose[cryptography]>=3.3
 psycopg[binary]>=3.2
+resend>=2.0

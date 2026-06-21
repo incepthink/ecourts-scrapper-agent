@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 
 import config
 import jobs
+import mailer
 import profile_data
 from advocate_search import AdvocateSearchClient
 from portal_status import PORTAL_DOWN_MESSAGE, is_portal_down
@@ -118,6 +119,7 @@ async def _run(job_id: int) -> None:
     # Generate + cache the AI narrative once, mark the advocate freshly scraped,
     # and resolve the advocate id the frontend will load the profile by.
     advocate_id = None
+    notify_to = ""
     with Session() as s:
         profile = profile_data.build_profile(
             s, name, state_code=state_code, dist_code=dist_code,
@@ -136,6 +138,9 @@ async def _run(job_id: int) -> None:
             job.phase = "done"
             job.advocate_id = advocate_id
             job.message = f"Done — {result.get('unique_cases', 0)} cases"
+            # Read fresh from the row: covers opt-in at search time AND mid-scrape
+            # enables via POST /jobs/{id}/notify.
+            notify_to = job.notify_email or ""
         s.commit()
 
     jobs.publish_event(conn, job_id, {
@@ -143,6 +148,15 @@ async def _run(job_id: int) -> None:
         "message": "Profile ready", "result": result,
     })
     logger.info("job %s done: %s", job_id, result)
+
+    # Best-effort completion email (no-op unless the user opted in + email is
+    # configured). mailer swallows its own errors, so this can't fail the job.
+    if notify_to and advocate_id:
+        from urllib.parse import urlencode
+
+        qs = urlencode({"adv": advocate_id, "sc": state_code, "dc": dist_code,
+                        "dn": district_name})
+        mailer.send_profile_ready_email(notify_to, profile, f"{config.PUBLIC_APP_URL}/?{qs}")
 
 
 def run_scrape_job(job_id: int) -> None:

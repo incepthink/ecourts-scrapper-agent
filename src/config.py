@@ -66,3 +66,14 @@ OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 # Set ECOURTS_AI_SUMMARY=0 to skip the OpenAI call (offline / free runs); the
 # report still renders, just without the AI profile section.
 AI_SUMMARY_ENABLED = os.environ.get("ECOURTS_AI_SUMMARY", "1") not in ("", "0", "false")
+
+# ---- Email notifications (Resend) -----------------------------------------
+# When a user opts in, the worker emails them a "report ready" notice with a link
+# back to the profile once a cold scrape finishes. Best-effort: disabled (or any
+# send failure) never affects the scrape itself.
+EMAIL_ENABLED = os.environ.get("ECOURTS_EMAIL_ENABLED", "0") not in ("", "0", "false")
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
+EMAIL_FROM = os.environ.get("EMAIL_FROM", "eCourts Profiles <onboarding@resend.dev>")
+# Public base URL of the Next.js app, used to build the profile link in the email
+# (the user-facing site, NOT the api. subdomain). No trailing slash.
+PUBLIC_APP_URL = os.environ.get("PUBLIC_APP_URL", "http://localhost:3000").rstrip("/")

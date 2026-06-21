@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSession } from "next-auth/react";
 import { motion, AnimatePresence } from "framer-motion";
 import { getStates, getDistricts, search } from "../lib/backend";
 import { staggerParent, fadeUp } from "./anim";
@@ -19,6 +20,7 @@ const GETS = [
 ];
 
 export default function SearchView({ onResult, notify, onPortalDown }) {
+  const { data: session } = useSession();
   const [states, setStates] = useState([]);
   const [districts, setDistricts] = useState([]);
   const [stateCode, setStateCode] = useState("");
@@ -98,12 +100,15 @@ export default function SearchView({ onResult, notify, onPortalDown }) {
     setConfirming(true); // confirm the name before committing to a scrape
   }
 
-  async function runSearch() {
+  async function runSearch(notifyEmail) {
     setConfirming(false);
     setBusy(true);
     try {
-      const res = await search({ name, state_code: stateCode, dist_code: distCode, district_name: distName });
-      onResult(res, { name, state_code: stateCode, dist_code: distCode, district_name: distName });
+      const res = await search({
+        name, state_code: stateCode, dist_code: distCode, district_name: distName,
+        notify_email: !!notifyEmail,
+      });
+      onResult(res, { name, state_code: stateCode, dist_code: distCode, district_name: distName }, !!notifyEmail);
     } catch (err) {
       if (err.status === 503) onPortalDown({ modal: true });
       else notify(err.message);
@@ -215,6 +220,7 @@ export default function SearchView({ onResult, notify, onPortalDown }) {
             name={name}
             distName={distName}
             stateName={stateName}
+            email={session?.user?.email}
             onCancel={() => setConfirming(false)}
             onConfirm={runSearch}
           />
