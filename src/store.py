@@ -85,6 +85,9 @@ class Case(Base):
     decision_date: Mapped[str] = mapped_column(String(64), default="")
     filing_date: Mapped[str] = mapped_column(String(64), default="")
     judge: Mapped[str] = mapped_column(String(255), default="")
+    # Cached AI one-sentence, layperson description of this case, generated once
+    # per scrape (see profile_data.build_profile) so page views never re-call OpenAI.
+    ai_blurb: Mapped[str] = mapped_column(Text, default="")
     history_fetched: Mapped[bool] = mapped_column(Boolean, default=False)
     state_code: Mapped[str] = mapped_column(String(8), default="")
     dist_code: Mapped[str] = mapped_column(String(8), default="")
@@ -167,7 +170,10 @@ def _ensure_columns() -> None:
     """
     insp = inspect(_engine)
     tables = set(insp.get_table_names())
-    wanted = {"advocates": {"ai_summary": "TEXT", "last_scraped_at": "TIMESTAMP"}}
+    wanted = {
+        "advocates": {"ai_summary": "TEXT", "last_scraped_at": "TIMESTAMP"},
+        "cases": {"ai_blurb": "TEXT"},
+    }
     with _engine.begin() as conn:
         for table, cols in wanted.items():
             if table not in tables:

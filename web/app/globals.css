@@ -628,6 +628,57 @@ h1, h2, h3 { font-family: var(--font-serif); font-optical-sizing: auto; letter-s
 .coadv .track > span { display: block; height: 100%; background: linear-gradient(90deg, var(--gold-700), var(--gold)); border-radius: var(--r-pill); }
 .coadv .ct { width: 30px; text-align: right; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
 
+/* long court names wrap rather than clip the fixed-width label */
+.coadv.court { align-items: flex-start; }
+.coadv.court .name { font-size: 13px; line-height: 1.35; color: var(--ink-2); }
+.coadv.court .track { margin-top: 4px; }
+
+/* ---- case category pill + plain-English type label + description ------- */
+.case .case-head { min-width: 0; }
+.case .ctype-row { display: flex; align-items: center; gap: 8px; margin-top: 5px; flex-wrap: wrap; }
+.case .ctype-row .ctype { margin-top: 0; }
+.cat-pill {
+  display: inline-flex; align-items: center; white-space: nowrap;
+  font-size: 11px; font-weight: 600; letter-spacing: .02em;
+  padding: 2px 9px; border-radius: var(--r-pill);
+  border: 1px solid var(--line); background: var(--surface-3); color: var(--other);
+}
+.cat-pill.criminal { background: var(--danger-bg); color: var(--danger-fg); border-color: var(--danger-line); }
+.cat-pill.bail     { background: var(--warn-bg);   color: var(--warn-fg);   border-color: var(--warn-line); }
+.cat-pill.civil    { background: #eaf1fb; color: #2a4f86; border-color: #cdddf3; }
+.cat-pill.family   { background: #f3edfa; color: #5b3d86; border-color: #e0d3f0; }
+.cat-pill.other    { background: var(--surface-3); color: var(--other); border-color: var(--line); }
+.case .blurb { margin: 9px 0 2px; font-size: 13px; line-height: 1.5; color: var(--muted); }
+
+/* ---- section subtitle (practice areas / courts) ------------------------ */
+.section-sub { color: var(--muted); font-size: 13px; margin: -2px 0 14px; }
+
+/* ---- practice-area bars: color-keyed dot + fill per category ----------- */
+.cat-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 8px; vertical-align: middle; background: var(--other); }
+.cat-dot.criminal { background: #b4544f; }
+.cat-dot.bail     { background: var(--gold); }
+.cat-dot.civil    { background: #3f6fb0; }
+.cat-dot.family   { background: #8a5cc0; }
+.cat-dot.other    { background: var(--other); }
+.coadv .track > span.cat-fill.criminal { background: linear-gradient(90deg, #9e4843, #c2655f); }
+.coadv .track > span.cat-fill.bail     { background: linear-gradient(90deg, var(--gold-700), var(--gold)); }
+.coadv .track > span.cat-fill.civil    { background: linear-gradient(90deg, #355f96, #4f82c0); }
+.coadv .track > span.cat-fill.family   { background: linear-gradient(90deg, #6f47a8, #9168c4); }
+.coadv .track > span.cat-fill.other    { background: linear-gradient(90deg, #6a7387, #8a93a6); }
+
+/* ---- experience card (left rail) -------------------------------------- */
+.exp-card { border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); padding: 14px 16px; }
+.exp-title {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--muted); margin-bottom: 12px;
+}
+.exp-title svg { color: var(--gold-700); }
+.exp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.exp-n { font-size: 20px; font-weight: 700; color: var(--navy); font-variant-numeric: tabular-nums; line-height: 1.1; }
+.exp-l { font-size: 11.5px; color: var(--muted); margin-top: 4px; }
+@media (max-width: 920px) { .exp-card { grid-column: 1 / -1; } }
+
 .profile-foot-action { display: flex; justify-content: center; margin-top: 4px; }
 
 .empty { text-align: center; color: var(--muted); padding: 40px 20px; }

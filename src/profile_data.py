@@ -23,6 +23,7 @@ from datetime import datetime
 from sqlalchemy import select
 
 import ai_summary
+import case_glossary
 import config
 from store import Advocate, Case, CaseAdvocate, Order, normalize_name
 
@@ -62,6 +63,42 @@ def _disposition(case) -> str:
     if not case.history_fetched:
         return "Unknown"
     return "Pending"
+
+
+# ---- plain-English per-case description (deterministic fallback) -----------
+
+# Opening clause per practice-area category, so a readable sentence exists even
+# when the AI blurb is absent (AI off, or an advocate cached before this feature).
+_CATEGORY_LEAD = {
+    "Criminal": "A criminal matter",
+    "Bail": "A bail application",
+    "Civil": "A civil matter",
+    "Family": "A family / matrimonial matter",
+    "Other": "A court matter",
+}
+
+
+def _clean_disposal(nature_of_disposal: str) -> str:
+    """Turn a raw disposal code (``Contested--ABATED``, ``Uncontested--ALLOWED /
+    GRANTED AFTER FULL HEARING``) into a lowercase, comma-joined readable phrase."""
+    parts = [p.strip() for p in re.split(r"-{2,}|/", nature_of_disposal or "") if p.strip()]
+    return ", ".join(p.lower() for p in parts)
+
+
+def _case_summary_line(case, category: str, disposition: str) -> str:
+    """Deterministic one-liner: the category as plain English + current status.
+
+    Always returns something readable, never blank — the UI shows this whenever an
+    AI blurb hasn't been generated for the case yet."""
+    lead = _CATEGORY_LEAD.get(category, "A court matter")
+    if disposition == "Disposed":
+        nd = _clean_disposal(case.nature_of_disposal)
+        tail = f"disposed ({nd})" if nd else "now disposed"
+    elif disposition == "Pending":
+        tail = "currently pending"
+    else:
+        tail = ""
+    return f"{lead}; {tail}." if tail else f"{lead}."
 
 
 # ---- "same person" matching -----------------------------------------------
@@ -203,6 +240,11 @@ def _ai_aggregates(cases: list[dict]) -> dict:
     case_types = Counter(
         x["case"].case_type.strip() for x in cases if (x["case"].case_type or "").strip()
     )
+    # Practice-area mix grouped into coarse, client-legible buckets (Criminal,
+    # Civil, Family, Bail, Other) — the "what does this lawyer do" signal.
+    practice_areas = Counter(
+        case_glossary.decode_case_type(x["case"].case_type)["category"] for x in cases
+    )
     courts = Counter(
         x["case"].establishment.strip()
         for x in cases
@@ -215,6 +257,7 @@ def _ai_aggregates(cases: list[dict]) -> dict:
     recent_cutoff = datetime.now().year - 3
     return {
         "case_type_counts": dict(case_types.most_common(8)),
+        "practice_areas": dict(practice_areas.most_common()),
         "court_counts": dict(courts.most_common(8)),
         "top_co_advocates": dict(co_adv.most_common(8)),
         "years_active": {
@@ -232,10 +275,13 @@ def _case_digests(cases: list[dict]) -> list[dict]:
     out: list[dict] = []
     for x in cases:
         c = x["case"]
+        decoded = case_glossary.decode_case_type(c.case_type)
         out.append(
             {
+                "cnr": c.cnr,
                 "case_number": c.case_number_full,
                 "case_type": c.case_type,
+                "case_type_label": decoded["label"],
                 "petitioner": c.petitioner,
                 "respondent": c.respondent,
                 "court": c.establishment,
@@ -266,21 +312,28 @@ def _case_to_dict(x: dict) -> dict:
     — order metadata only, since the live product doesn't store PDFs)."""
     c = x["case"]
     oc = _outcome_class(c.nature_of_disposal)
+    disp = _disposition(c)
+    decoded = case_glossary.decode_case_type(c.case_type)
     return {
         "cnr": c.cnr,
         "case_number": c.case_number_full,
         "case_type": c.case_type,
+        "case_type_label": decoded["label"],
+        "category": decoded["category"],
         "year": c.year,
         "petitioner": c.petitioner,
         "respondent": c.respondent,
         "court": c.establishment,
         "judge": c.judge,
-        "status": _disposition(c),
+        "status": disp,
         "nature_of_disposal": c.nature_of_disposal,
         "outcome_class": oc,
         "outcome_label": _OUTCOME_LABEL[oc],
         "decision_date": c.decision_date,
         "filing_date": c.filing_date,
+        # AI one-liner if generated for this case, else a deterministic readable line.
+        "ai_blurb": (c.ai_blurb or "").strip(),
+        "summary": _case_summary_line(c, decoded["category"], disp),
         "co_advocates": x["co_advocates"],
         "orders": [
             {"order_number": o.order_number, "order_date": o.order_date, "label": o.label}
@@ -356,10 +409,21 @@ def build_profile(
     stats = _compute_stats(cases)
     aggregates = _ai_aggregates(cases)
     if generate_ai:
+        digests = _case_digests(cases)
         ai_text = ai_summary.generate_advocate_summary(
-            advocate_name, stats, _case_digests(cases),
+            advocate_name, stats, digests,
             aggregates=aggregates, district=district_label,
         ) or ""
+        # One batched call -> a plain-English sentence per case. Persist each onto
+        # its Case row; the caller (worker) owns the session and commits, so the
+        # blurbs are cached exactly like the advocate-level ai_summary.
+        blurbs = ai_summary.generate_case_blurbs(
+            advocate_name, digests, district=district_label,
+        )
+        for x in cases:
+            blurb = blurbs.get(x["case"].cnr)
+            if blurb:
+                x["case"].ai_blurb = blurb
     else:
         ai_text = _cached_ai_text(matches, advocate_name)
 

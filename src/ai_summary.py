@@ -120,3 +120,89 @@ def generate_advocate_summary(
         return None
     logger.info("AI summary generated for %r (model=%s)", advocate_name, config.OPENAI_MODEL)
     return text
+
+
+_BLURB_SYSTEM_PROMPT = (
+    "You write one-sentence, plain-English descriptions of Indian district-court "
+    "cases for a non-lawyer reader, from public eCourts records. For each case you "
+    "are given its case number (CNR), case type, the two parties, the court, its "
+    "status (Disposed/Pending/Unknown) and, if disposed, the nature of disposal. "
+    "Return ONE neutral sentence per case that says, in everyday language, what kind "
+    "of matter it is and what has happened so far (e.g. 'A cheque-related summons "
+    "case between two private parties, disposed in the magistrate court after the "
+    "matter abated.'). Rules: use ONLY the data given — never invent facts, charges, "
+    "amounts, dates or outcomes; do not claim the advocate won or lost (they may act "
+    "for either side); avoid legal jargon; keep each sentence under ~30 words. "
+    'Respond with a JSON object of the exact shape {"blurbs": [{"cnr": "...", '
+    '"text": "..."}, ...]} covering every case given, and nothing else.'
+)
+
+
+def generate_case_blurbs(
+    advocate_name: str,
+    case_digests: list[dict],
+    *,
+    district: str | None = None,
+) -> dict[str, str]:
+    """Return ``{cnr: one-sentence plain-English description}`` for the cases.
+
+    One batched OpenAI call for the whole (capped) portfolio. Each ``case_digest``
+    must carry a ``cnr`` so blurbs can be keyed back to cases. Degrades to ``{}`` on
+    a disabled flag, missing key, or any API/parse error — callers then fall back to
+    the deterministic ``summary`` line, so the UI never depends on this succeeding.
+    """
+    if not config.AI_SUMMARY_ENABLED:
+        logger.info("AI summary disabled (ECOURTS_AI_SUMMARY=0); skipping case blurbs")
+        return {}
+    if not config.OPENAI_API_KEY:
+        logger.warning("OPENAI_API_KEY not set; skipping case blurbs")
+        return {}
+    digests = [d for d in case_digests if d.get("cnr")][:MAX_CASE_DIGESTS]
+    if not digests:
+        return {}
+
+    payload = {
+        "advocate_name": advocate_name,
+        "district": district or config.DISTRICT_NAME,
+        "cases": [
+            {
+                "cnr": d.get("cnr"),
+                "case_type": d.get("case_type"),
+                "case_type_label": d.get("case_type_label"),
+                "petitioner": d.get("petitioner"),
+                "respondent": d.get("respondent"),
+                "court": d.get("court"),
+                "status": d.get("status"),
+                "nature_of_disposal": d.get("nature_of_disposal"),
+            }
+            for d in digests
+        ],
+    }
+    user_msg = (
+        "Write a one-sentence description for each of these cases (JSON):\n\n"
+        + json.dumps(payload, ensure_ascii=False, default=str)
+    )
+
+    try:
+        completion = _get_client().chat.completions.create(
+            model=config.OPENAI_MODEL,
+            messages=[
+                {"role": "system", "content": _BLURB_SYSTEM_PROMPT},
+                {"role": "user", "content": user_msg},
+            ],
+            temperature=0.3,
+            response_format={"type": "json_object"},
+        )
+        data = json.loads(completion.choices[0].message.content or "{}")
+    except Exception as e:  # noqa: BLE001 - degrade gracefully, never break the profile
+        logger.warning("OpenAI case-blurb call failed; skipping per-case AI: %s", e)
+        return {}
+
+    out: dict[str, str] = {}
+    for item in data.get("blurbs", []) if isinstance(data, dict) else []:
+        cnr = (item or {}).get("cnr")
+        text = ((item or {}).get("text") or "").strip()
+        if cnr and text:
+            out[str(cnr)] = text
+    logger.info("AI case blurbs generated for %r (%d cases)", advocate_name, len(out))
+    return out

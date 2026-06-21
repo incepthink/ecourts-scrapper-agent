@@ -18,6 +18,13 @@ function initials(name) {
   return ((parts[0]?.[0] || "") + (parts[1]?.[0] || "")).toUpperCase() || "?";
 }
 
+// Stable slug for a practice-area category, used to color-key pills + bars in CSS
+// (.cat-pill.criminal, .cat-fill.civil, …). Anything unmapped -> "other".
+function catSlug(category) {
+  const s = (category || "").toLowerCase().replace(/[^a-z]/g, "");
+  return ["criminal", "bail", "civil", "family"].includes(s) ? s : "other";
+}
+
 // Animated number that counts up from 0 on mount.
 function CountUp({ value }) {
   const [display, setDisplay] = useState(0);
@@ -137,15 +144,21 @@ function CaseCard({ c, index }) {
       transition={{ duration: 0.32, ease: EASE, delay: Math.min(index, 12) * 0.03 }}
     >
       <div className="row1">
-        <div>
+        <div className="case-head">
           <span className="cno">{c.case_number || c.cnr}</span>
-          {c.case_type ? <div className="ctype">{c.case_type}</div> : null}
+          <div className="ctype-row">
+            {c.category ? <span className={`cat-pill ${catSlug(c.category)}`}>{c.category}</span> : null}
+            {c.case_type_label ? <span className="ctype">{c.case_type_label}</span> : null}
+          </div>
         </div>
         <span className={`status-badge ${status}`}>{c.status}</span>
       </div>
       <div className="parties">
         {c.petitioner || "—"} <span className="vs">vs</span> {c.respondent || "—"}
       </div>
+      {c.ai_blurb || c.summary ? (
+        <div className="blurb">{c.ai_blurb || c.summary}</div>
+      ) : null}
       <div className="metas">
         {c.court ? <span className="tag">{c.court}</span> : null}
         {c.judge ? <span className="tag">{c.judge}</span> : null}
@@ -172,7 +185,7 @@ function CasesSection({ cases }) {
       if (filter === "won" && c.outcome_class !== "won") return false;
       if (filter === "lost" && c.outcome_class !== "lost") return false;
       if (q) {
-        const hay = `${c.case_number} ${c.petitioner} ${c.respondent} ${c.court} ${c.judge} ${c.nature_of_disposal}`.toLowerCase();
+        const hay = `${c.case_number} ${c.case_type_label} ${c.category} ${c.petitioner} ${c.respondent} ${c.court} ${c.judge} ${c.nature_of_disposal} ${c.ai_blurb || ""} ${c.summary || ""}`.toLowerCase();
         if (!hay.includes(q.toLowerCase())) return false;
       }
       return true;
@@ -236,6 +249,86 @@ function CoAdvocates({ coAdvocates }) {
             />
           </span>
           <span className="ct">{x.count}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Compact "years active + recency" card, shown in the left rail under the stats.
+function Experience({ years }) {
+  if (!years) return null;
+  const { earliest, latest, cases_in_last_3_years } = years;
+  if (!earliest && !latest) return null;
+  const span = earliest && latest ? latest - earliest + 1 : null;
+  const range = earliest && latest ? `${earliest}–${latest}` : `${latest || earliest}`;
+  return (
+    <motion.div className="exp-card" variants={fadeUp} initial="initial" animate="animate">
+      <div className="exp-title"><Activity size={14} /> Experience</div>
+      <div className="exp-grid">
+        <div className="exp-item">
+          <div className="exp-n">{range}</div>
+          <div className="exp-l">{span ? `${span} yr${span > 1 ? "s" : ""} on record` : "active"}</div>
+        </div>
+        <div className="exp-item">
+          <div className="exp-n"><CountUp value={cases_in_last_3_years || 0} /></div>
+          <div className="exp-l">in the last 3 yrs</div>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+// Practice-area mix — the clearest "what does this lawyer do" signal. Bars are
+// color-keyed by category (CSS .cat-fill.<slug>) to match the per-case pills.
+function PracticeAreas({ areas }) {
+  const entries = Object.entries(areas || {}).filter(([, n]) => n > 0);
+  if (!entries.length) return null;
+  const max = Math.max(...entries.map(([, n]) => n), 1);
+  return (
+    <div className="section">
+      <h2 className="section-title"><span className="tk"><Scale size={18} /></span> Practice areas</h2>
+      <p className="section-sub">The kinds of matters this advocate handles, by case count.</p>
+      {entries.map(([cat, n]) => (
+        <div className="coadv" key={cat}>
+          <span className="name"><span className={`cat-dot ${catSlug(cat)}`} />{cat}</span>
+          <span className="track">
+            <motion.span
+              className={`cat-fill ${catSlug(cat)}`}
+              initial={{ width: 0 }}
+              whileInView={{ width: `${(n / max) * 100}%` }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.7, ease: EASE }}
+            />
+          </span>
+          <span className="ct">{n}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Where the advocate appears most — jurisdiction-fit signal for the client.
+function TopCourts({ courts }) {
+  const entries = Object.entries(courts || {});
+  if (!entries.length) return null;
+  const max = Math.max(...entries.map(([, n]) => n), 1);
+  return (
+    <div className="section">
+      <h2 className="section-title"><span className="tk"><Landmark size={18} /></span> Courts &amp; jurisdiction</h2>
+      <p className="section-sub">Where this advocate most often appears.</p>
+      {entries.map(([court, n]) => (
+        <div className="coadv court" key={court}>
+          <span className="name">{court}</span>
+          <span className="track">
+            <motion.span
+              initial={{ width: 0 }}
+              whileInView={{ width: `${(n / max) * 100}%` }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.7, ease: EASE }}
+            />
+          </span>
+          <span className="ct">{n}</span>
         </div>
       ))}
     </div>
@@ -341,10 +434,12 @@ export default function Profile({ profile, onReset }) {
       <div className="profile-layout">
         <aside className="profile-rail">
           <StatCards stats={profile.stats} />
+          <Experience years={profile.aggregates?.years_active} />
         </aside>
 
         <div className="profile-main">
           <OutcomeViz stats={profile.stats} />
+          <PracticeAreas areas={profile.aggregates?.practice_areas} />
 
           {profile.ai_summary ? (
             <div className="section">
@@ -356,6 +451,7 @@ export default function Profile({ profile, onReset }) {
           ) : null}
 
           <CasesSection cases={profile.cases} />
+          <TopCourts courts={profile.aggregates?.court_counts} />
           <CoAdvocates coAdvocates={profile.co_advocates} />
           <div className="profile-foot-action">
             <button className="btn" onClick={onReset}><Plus size={16} /> New search</button>
