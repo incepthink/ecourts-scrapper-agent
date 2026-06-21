@@ -36,6 +36,14 @@ function clearProfileUrl() {
 export default function Page() {
   const { data: session, status } = useSession();
   const [view, setView] = useState("search"); // search | progress | profile
+  // True when the URL already names a profile (a reload or shared link). Known on
+  // the very first render so we can hold the loading screen instead of flashing the
+  // search view before the async restore finishes. Hydration-safe: SSG has no
+  // window (-> false), and the first client render shows the spinner regardless
+  // because status === "loading".
+  const [restoring, setRestoring] = useState(
+    () => typeof window !== "undefined" && new URLSearchParams(window.location.search).has("adv")
+  );
   const [job, setJob] = useState({ progress: 0, message: "" });
   const [liveCases, setLiveCases] = useState([]);
   const [profile, setProfile] = useState(null);
@@ -166,7 +174,7 @@ export default function Page() {
     if (status !== "authenticated" || restoredRef.current) return;
     const params = new URLSearchParams(window.location.search);
     const adv = params.get("adv");
-    if (!adv) return;
+    if (!adv) { setRestoring(false); return; }
     restoredRef.current = true;
     const scope = {
       state_code: params.get("sc") || "",
@@ -174,17 +182,25 @@ export default function Page() {
       district_name: params.get("dn") || "",
     };
     scopeRef.current = scope;
-    loadProfile(Number(adv), scope).catch((e) => {
-      notify(e.message);
-      clearProfileUrl();
-      setView("search");
-    });
+    loadProfile(Number(adv), scope)
+      .catch((e) => {
+        notify(e.message);
+        clearProfileUrl();
+        setView("search");
+      })
+      // Drop the restore gate once it settles: on success ``view`` is already
+      // "profile"; on failure this lets the search view render with the error toast.
+      .finally(() => setRestoring(false));
   }, [status, loadProfile, notify]);
 
-  if (status === "loading") {
+  // Hold the loading screen through a pending profile restore so the search view
+  // never flashes before the shared/reloaded profile is ready. ``session &&`` keeps
+  // a logged-out recipient on <SignIn /> below; ``view !== "profile"`` drops the
+  // spinner the instant the profile is set (it then animates in normally).
+  if (status === "loading" || (session && restoring && view !== "profile")) {
     return (
       <>
-        <TopBar session={null} />
+        <TopBar session={session} />
         <div className="center">
           <div style={{ color: "var(--muted)", display: "grid", placeItems: "center", gap: 12 }}>
             <span className="spin"><Loader size={26} /></span>
