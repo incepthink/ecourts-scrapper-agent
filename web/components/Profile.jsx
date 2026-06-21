@@ -366,18 +366,18 @@ function Experience({ years }) {
   const { earliest, latest, cases_in_last_3_years } = years;
   if (!earliest && !latest) return null;
   const span = earliest && latest ? latest - earliest + 1 : null;
-  const range = earliest && latest ? `${earliest}–${latest}` : `${latest || earliest}`;
+  const range = earliest && latest ? `${earliest} – ${latest}` : `${latest || earliest}`;
   return (
     <motion.div className="exp-card" variants={fadeUp} initial="initial" animate="animate">
       <div className="exp-title"><Activity size={14} /> Experience</div>
       <div className="exp-grid">
         <div className="exp-item">
           <div className="exp-n">{range}</div>
-          <div className="exp-l">{span ? `${span} yr${span > 1 ? "s" : ""} on record` : "active"}</div>
+          <div className="exp-l">{span ? `${span} year${span > 1 ? "s" : ""} on record` : "active"}</div>
         </div>
         <div className="exp-item">
-          <div className="exp-n"><CountUp value={cases_in_last_3_years || 0} /></div>
-          <div className="exp-l">in the last 3 yrs</div>
+          <div className="exp-n"><CountUp value={cases_in_last_3_years || 0} /> <span className="exp-unit">cases</span></div>
+          <div className="exp-l">in the last 3 years</div>
         </div>
       </div>
     </motion.div>
