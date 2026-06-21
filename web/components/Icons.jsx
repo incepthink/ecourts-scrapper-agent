@@ -178,6 +178,18 @@ export const Plus = (p) => (
   </Svg>
 );
 
+export const ChevronLeft = (p) => (
+  <Svg {...p}>
+    <polyline points="15 18 9 12 15 6" />
+  </Svg>
+);
+
+export const ChevronRight = (p) => (
+  <Svg {...p}>
+    <polyline points="9 18 15 12 9 6" />
+  </Svg>
+);
+
 export const Gavel = (p) => (
   <Svg {...p}>
     <path d="M14 13l-7.5 7.5a2.12 2.12 0 0 1-3-3L11 10" />

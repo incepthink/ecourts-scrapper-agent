@@ -1,13 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { motion, AnimatePresence, animate } from "framer-motion";
+import { motion, animate } from "framer-motion";
 import { fetchReportHtml } from "../lib/backend";
 import { fadeUp, staggerParent, EASE } from "./anim";
 import {
   FileText, CheckCircle, Clock, Check, X, Landmark, Scale, Users,
-  Sparkles, Activity, Download, Plus, SearchIcon,
+  Sparkles, Activity, Download, Plus, SearchIcon, ChevronLeft, ChevronRight,
 } from "./Icons";
+
+// Cases are paginated client-side so a 200+ case list stays scannable.
+const CASES_PER_PAGE = 10;
 
 function pct(n, total) {
   return total > 0 ? Math.round((n / total) * 100) : 0;
@@ -174,9 +177,70 @@ function CaseCard({ c, index }) {
   );
 }
 
+// Compact page list: always show first/last and current ±1, collapsing the
+// gaps into "…" so the control stays short even with dozens of pages.
+function pageItems(current, total) {
+  const keep = new Set([1, 2, total - 1, total, current - 1, current, current + 1]);
+  const pages = [...keep].filter((p) => p >= 1 && p <= total).sort((a, b) => a - b);
+  const out = [];
+  let prev = 0;
+  for (const p of pages) {
+    if (p - prev > 1) out.push("gap");
+    out.push(p);
+    prev = p;
+  }
+  return out;
+}
+
+function Pagination({ page, pageCount, onChange }) {
+  if (pageCount <= 1) return null;
+  return (
+    <nav className="pager" aria-label="Cases pages">
+      <button
+        className="pager-btn"
+        onClick={() => onChange(page - 1)}
+        disabled={page === 1}
+        aria-label="Previous page"
+      >
+        <ChevronLeft size={16} />
+      </button>
+      <div className="pager-pages">
+        {pageItems(page, pageCount).map((p, i) =>
+          p === "gap" ? (
+            <span key={`gap-${i}`} className="pager-gap" aria-hidden="true">…</span>
+          ) : (
+            <button
+              key={p}
+              className={`pager-num ${p === page ? "active" : ""}`}
+              onClick={() => onChange(p)}
+              aria-label={`Page ${p}`}
+              aria-current={p === page ? "page" : undefined}
+            >
+              {p === page && (
+                <motion.span layoutId="pager-bg" className="pager-bg" transition={{ duration: 0.28, ease: EASE }} />
+              )}
+              <span className="pn">{p}</span>
+            </button>
+          )
+        )}
+      </div>
+      <button
+        className="pager-btn"
+        onClick={() => onChange(page + 1)}
+        disabled={page === pageCount}
+        aria-label="Next page"
+      >
+        <ChevronRight size={16} />
+      </button>
+    </nav>
+  );
+}
+
 function CasesSection({ cases }) {
   const [filter, setFilter] = useState("all");
   const [q, setQ] = useState("");
+  const [page, setPage] = useState(1);
+  const topRef = useRef(null);
 
   const filtered = useMemo(() => {
     return cases.filter((c) => {
@@ -192,6 +256,28 @@ function CasesSection({ cases }) {
     });
   }, [cases, filter, q]);
 
+  // Filtering/searching changes the result set, so jump back to the first page.
+  useEffect(() => { setPage(1); }, [filter, q]);
+
+  const pageCount = Math.max(1, Math.ceil(filtered.length / CASES_PER_PAGE));
+  // Guard against a stale page index for the render before the reset effect runs.
+  const safePage = Math.min(page, pageCount);
+  const start = (safePage - 1) * CASES_PER_PAGE;
+  const visible = filtered.slice(start, start + CASES_PER_PAGE);
+  const rangeEnd = Math.min(start + CASES_PER_PAGE, filtered.length);
+
+  function goToPage(p) {
+    const next = Math.min(Math.max(p, 1), pageCount);
+    if (next === safePage) return;
+    setPage(next);
+    // Bring the list header back under the sticky toolbar so the new page reads
+    // from row one instead of wherever the user happened to be scrolled.
+    if (topRef.current) {
+      const top = topRef.current.getBoundingClientRect().top + window.scrollY - 84;
+      window.scrollTo({ top, behavior: "smooth" });
+    }
+  }
+
   const chips = [
     ["all", "All"],
     ["disposed", "Disposed"],
@@ -202,7 +288,7 @@ function CasesSection({ cases }) {
 
   return (
     <div className="section">
-      <h2 className="section-title"><span className="tk"><FileText size={18} /></span> Cases ({filtered.length})</h2>
+      <h2 ref={topRef} className="section-title"><span className="tk"><FileText size={18} /></span> Cases ({filtered.length})</h2>
       <div className="cases-toolbar">
         <div className="filters">
           {chips.map(([k, label]) => (
@@ -225,7 +311,26 @@ function CasesSection({ cases }) {
       {filtered.length === 0 ? (
         <div className="empty">No matching cases.</div>
       ) : (
-        filtered.map((c, i) => <CaseCard key={c.cnr} c={c} index={i} />)
+        <>
+          {/* Keyed by page so each switch remounts the rows and replays their
+              staggered fade-in-up — no exit gap that would jump the scroll. */}
+          <motion.div
+            key={safePage}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.26, ease: EASE }}
+          >
+            {visible.map((c, i) => <CaseCard key={c.cnr} c={c} index={i} />)}
+          </motion.div>
+          {pageCount > 1 ? (
+            <div className="pager-bar">
+              <span className="pager-info">
+                Showing <b>{start + 1}</b>–<b>{rangeEnd}</b> of <b>{filtered.length}</b>
+              </span>
+              <Pagination page={safePage} pageCount={pageCount} onChange={goToPage} />
+            </div>
+          ) : null}
+        </>
       )}
     </div>
   );
